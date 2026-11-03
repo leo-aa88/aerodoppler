@@ -1,0 +1,26 @@
+# data (never commit recordings, archives, derived rasters, runs)
+data/
+!data/.gitkeep
+*.wav
+*.flac
+*.mp3
+!tests/fixtures/**/*.wav
+# python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+# web
+web/node_modules/
+web/.next/
+web/out/
+web/next-env.d.ts
+# env
+.env
+# scratch
+*.log
