@@ -183,6 +183,10 @@ class DopplerEvent(BaseModel):
     detection_quality: float = Field(default=0.0, ge=0.0, le=1.0)
     annotated_by: str | None = None
     created_at: str = Field(default_factory=utc_now_iso)
+    ridge_harmonic: int = Field(
+        default=1, ge=1, description="harmonic number the ridge points belong to"
+    )
+    extra: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("ridge_points")
     @classmethod
