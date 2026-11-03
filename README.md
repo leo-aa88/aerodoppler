@@ -39,9 +39,9 @@ to `data/runs/demo/`:
 | ![](docs/img/demo_spectrogram_ridges.png) | ![](docs/img/demo_mode_a_curves.png) |
 | auto-detected ridges (SYNTHETIC) | observed (dotted) vs predicted (dashed) curves at the top-1 location |
 
-Observed demo result (seed 7, SNR 10 dB at CPA): Mode A top-1 error **19.6 m** with the recording
-clock recovered to 0.24 s and both fundamentals within 0.1 Hz; Mode B (known time ±10 s, one
-event) **187 m**. These are synthetic numbers; see "Benchmarks" below.
+Observed demo result (seed 7, SNR 10 dB at CPA, final code): Mode A top-1 error **7.3 m** with
+the recording clock recovered to 0.2 s; Mode B (known time ±10 s, one straight flyby, which is
+along-track/mirror ambiguous) **128 m**. These are synthetic numbers; see "Benchmarks" below.
 
 Full test suite including the slow end-to-end and API tests (~10 min):
 

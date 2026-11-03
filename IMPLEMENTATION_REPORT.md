@@ -168,8 +168,11 @@ distractors, 60 Hz hum, gusts, SNR 10 dB at CPA, synthetic DEM, baro-offset ADS-
 [demo] mode_b: abstained=False best error 187.4 m, score 4.6, inferred start 2026-09-08T14:07:10Z (truth …13Z)
 ```
 
-(an earlier run of the same demo with seed 7 gave 48.8 m / 108.6 m; differences come from the
-coarse grid phase and the 25 m refinement, both reported as `nominal_grid_spacing_m`).
+(earlier runs of the same demo during development gave 48.8 m / 108.6 m and 29.9 m / 73 m;
+the **final code** gives Mode A **7.3 m** (score 4.21, inferred start 14:07:12.8 vs truth
+14:07:13.0) and Mode B **128 m** (±10 s clock, single straight flyby: along-track/mirror
+ambiguity, see docs/theory.md). Differences come from the coarse grid phase and the 25 m
+refinement, both reported as `nominal_grid_spacing_m`.)
 Figures: `data/runs/demo/mode_a_map.png`, `mode_a_curves_best.png`, `mode_b_*`,
 `spectrogram_detected_ridges.png` (copied to `docs/img/` for the README).
 
