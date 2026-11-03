@@ -129,6 +129,53 @@ class ScoredAssignment:
 # ---------------------------------------------------------------------------------------
 
 _CTX: EngineContext | None = None
+UNEXPLAINED_EVENT_SCORE = 1.0
+
+
+def attach_extra_events(
+    assignments: list[Assignment], sp, feats: list[EventFeatures], tol_s: float
+) -> int:
+    """For every assignment, explain events 3..k with the sparse-CPA entry at the same grid
+    point whose delayed CPA is closest to ``t0_center + centre_k`` (within tol and the event's
+    speed/slant bounds). Unexplained slots get seg_idx -1. Returns the number of unexplained."""
+    order = np.lexsort((sp.tau, sp.point_idx))
+    pts = sp.point_idx[order]
+    taus = sp.tau[order]
+    starts = np.searchsorted(pts, np.arange(int(pts.max()) + 2) if len(pts) else np.array([0]))
+    n_unexpl = 0
+    for a in assignments:
+        p = a.point_idx
+        lo, hi = (int(starts[p]), int(starts[p + 1])) if p + 1 < len(starts) else (0, 0)
+        seg_extra, tau_extra, slant_extra = [], [], []
+        for f in feats[2:]:
+            target = a.t0_center + f.t_center_s
+            best, best_d = -1, tol_s
+            if hi > lo:
+                j = lo + int(np.searchsorted(taus[lo:hi], target))
+                for cand in (j - 1, j):
+                    if lo <= cand < hi:
+                        i = order[cand]
+                        d = abs(sp.tau[i] - target)
+                        if (
+                            d <= best_d
+                            and f.v_min_mps <= sp.speed[i] <= f.v_max_mps
+                            and f.d_min_m <= sp.slant[i] <= f.d_max_m
+                            and int(sp.seg_idx[i]) not in a.seg_idx
+                        ):
+                            best, best_d = i, d
+            if best < 0:
+                n_unexpl += 1
+                seg_extra.append(-1)
+                tau_extra.append(float("nan"))
+                slant_extra.append(float("nan"))
+            else:
+                seg_extra.append(int(sp.seg_idx[best]))
+                tau_extra.append(float(sp.tau[best]))
+                slant_extra.append(float(sp.slant[best]))
+        a.seg_idx = a.seg_idx + tuple(seg_extra)
+        a.tau = a.tau + tuple(tau_extra)
+        a.slant = a.slant + tuple(slant_extra)
+    return n_unexpl
 
 
 def _t0_candidates(
@@ -154,7 +201,11 @@ def _score_point(
         cfg = ctx.coarse_cfg if coarse else ctx.score_cfg
     curves, inputs = [], []
     taus = taus or assignment.tau
+    unexplained: list[int] = []
     for e, (si, tau, f) in enumerate(zip(assignment.seg_idx, taus, ctx.feats, strict=True)):
+        if si < 0:  # extra event with no flight at the right time for this hypothesis
+            unexplained.append(e)
+            continue
         traj = ctx.segments[si].traj_build.trajectory
         assert traj is not None
         half = 0.5 * (f.t_end_s - f.t_start_s) + 30.0
@@ -179,7 +230,25 @@ def _score_point(
             )
         )
     t0c = assignment.t0_center if ctx.mode == SearchMode.UNKNOWN_TIME else float(ctx.t0_known)
-    return locked_score(ctx.spec, curves, inputs, _t0_candidates(ctx, t0c, coarse, ultra), cfg)
+    res = locked_score(ctx.spec, curves, inputs, _t0_candidates(ctx, t0c, coarse, ultra), cfg)
+    if unexplained:
+        # an unexplained detected event weakens the hypothesis: it enters the mean with a
+        # neutral score (archives do miss aircraft) but cannot be compensated by others
+        from aerodoppler.search.score import EventScore
+
+        explained = [e.score for e in res.per_event]
+        all_scores = explained + [UNEXPLAINED_EVENT_SCORE] * len(unexplained)
+        combined = float(np.mean(all_scores))
+        if len(explained) > 1:
+            combined -= cfg.imbalance_lambda * 0.5 * float(max(explained) - min(explained))
+        res.combined = combined
+        per_event = list(res.per_event)
+        for e in unexplained:
+            per_event.insert(
+                e, EventScore(UNEXPLAINED_EVENT_SCORE, float("nan"), 0.0, 0.0, 0.0, 0.0, 0)
+            )
+        res.per_event = per_event
+    return res
 
 
 def _worker_score(args: tuple[int, int]) -> tuple[int, LockedResult]:
@@ -254,9 +323,11 @@ class SearchEngine:
             else SoundSpeed(q.speed_of_sound_mps, 3.0, "operator supplied")
         )
         feats = [measure_event(ev, c.c_mps) for ev in events]
-        order = np.argsort([f.t_center_s for f in feats])
-        events = [events[i] for i in order]
-        feats = [feats[i] for i in order]
+        # the first two events of the request are the pairing events (sorted by time); any
+        # further events are "extra" events explained at the shared t0 (Mode A)
+        pair_order = np.argsort([f.t_center_s for f in feats[:2]])
+        events = [events[i] for i in pair_order] + events[2:]
+        feats = [feats[i] for i in pair_order] + feats[2:]
         for f in feats:
             for fl in f.flags:
                 self.warnings.append(f"event {f.event_id}: {fl}")
@@ -402,6 +473,16 @@ class SearchEngine:
                 self.counters,
                 q.max_assignments,
                 self.warnings,
+            )
+        if req.mode == SearchMode.UNKNOWN_TIME and len(feats) > 2 and assignments:
+            n_unexpl = attach_extra_events(assignments, sp, feats, q.event_separation_tolerance_s)
+            self.counters.append(
+                StageCounter(
+                    stage="extra_events_attached",
+                    candidates_in=len(assignments),
+                    candidates_out=len(assignments),
+                    note=f"{len(feats) - 2} additional event(s) explained by the flight whose delayed CPA matches t0 + centre (± tol); {n_unexpl} event slots left unexplained",
+                )
             )
         self._stage("candidates_generated", n=len(assignments))
         if not assignments:
@@ -570,6 +651,8 @@ class SearchEngine:
                         closest_approach(
                             segments[si].traj_build.trajectory, ecef[j], c.c_mps
                         ).t_receive_cpa
+                        if si >= 0
+                        else float("nan")
                         for si in sa0.assignment.seg_idx
                     )  # type: ignore[arg-type]
                     tasks.append(
@@ -802,9 +885,18 @@ class SearchEngine:
         distinct_scores = [s.total for s in refined]
         amb = ambiguity_flags(distinct_scores, RankConfig())
         for rank, sa in enumerate(refined, start=1):
-            seg_ids = [segments[i].segment_id for i in sa.assignment.seg_idx]
+            seg_ids = [
+                segments[i].segment_id if i >= 0 else "(unexplained)" for i in sa.assignment.seg_idx
+            ]
             flags = list(flags_common) + (amb if rank <= 2 else [])
+            n_unexpl = sum(1 for i in sa.assignment.seg_idx if i < 0)
+            if n_unexpl:
+                flags.append(
+                    f"{n_unexpl} detected event(s) not explained by any flight at this hypothesis"
+                )
             for i in sa.assignment.seg_idx:
+                if i < 0:
+                    continue
                 if segments[i].traj_build.datum != "geometric_wgs84_hae":
                     flags.append(
                         f"{segments[i].segment_id}: altitude datum {segments[i].traj_build.datum} (sigma {segments[i].traj_build.altitude_sigma_m:.0f} m)"
@@ -838,7 +930,9 @@ class SearchEngine:
                             else t0_known
                         )
                     ),
-                    source_fundamental_hz_per_event=[e.f0_hz for e in sa.locked.per_event],
+                    source_fundamental_hz_per_event=[
+                        e.f0_hz if np.isfinite(e.f0_hz) else None for e in sa.locked.per_event
+                    ],
                     score_total=sa.total,
                     score_components=ScoreComponents(
                         per_event=[e.score for e in sa.locked.per_event],
@@ -861,10 +955,22 @@ class SearchEngine:
                                 "class": segments[i].aircraft_class,
                                 "callsign": segments[i].callsign,
                             }
+                            if i >= 0
+                            else {
+                                "segment_id": None,
+                                "icao24": None,
+                                "type": None,
+                                "class": "unexplained",
+                                "callsign": None,
+                            }
                             for i in sa.assignment.seg_idx
                         ],
-                        "tau_abs": [unix_to_iso(t) for t in sa.assignment.tau],
-                        "slant_m": list(sa.assignment.slant),
+                        "tau_abs": [
+                            unix_to_iso(t) if np.isfinite(t) else None for t in sa.assignment.tau
+                        ],
+                        "slant_m": [
+                            float(x) if np.isfinite(x) else None for x in sa.assignment.slant
+                        ],
                         "alpha_per_s": [e.alpha_per_s for e in sa.locked.per_event],
                         "silence_log": sa.silence_log,
                         "stage": sa.stage,
@@ -975,6 +1081,11 @@ class SearchEngine:
             for e_idx, (si, tau) in enumerate(
                 zip(sa.assignment.seg_idx, sa.assignment.tau, strict=True)
             ):
+                if si < 0:
+                    payload["events"].append(
+                        {"event_id": feats[e_idx].event_id, "segment_id": None, "unexplained": True}
+                    )
+                    continue
                 traj = segments[si].traj_build.trajectory
                 f = feats[e_idx]
                 half = 0.5 * (f.t_end_s - f.t_start_s) + 60.0
@@ -1014,7 +1125,7 @@ class SearchEngine:
                 )
             (cdir / f"{cand.candidate_id}.json").write_text(json.dumps(payload))
         # flight tracks for the map (segments used by any candidate + all considered)
-        used = {i for sa in refined for i in sa.assignment.seg_idx}
+        used = {i for sa in refined for i in sa.assignment.seg_idx if i >= 0}
         tracks = []
         for i, s in enumerate(segments):
             traj = s.traj_build.trajectory

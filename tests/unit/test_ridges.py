@@ -120,3 +120,38 @@ def test_merge_adjacent_ridge_pieces():
     merged = _merge_adjacent([r1, r2, far], hop=0.25, df=0.244, max_gap_s=6.0, max_df_bins=6.0)
     assert len(merged) == 2
     assert merged[0].times[-1] == t2[-1] and len(merged[0].times) == len(t1) + len(t2)
+
+
+def test_pick_events_adds_time_separated_extras():
+    from aerodoppler.audio.service import pick_events
+    from aerodoppler.models import DopplerEvent, RidgePoint
+
+    def ev(t0, f, q, nh, eid):
+        pts = [
+            RidgePoint(relative_t_s=t0 + i, frequency_hz=f - 0.1 * i, uncertainty_hz=1.0)
+            for i in range(60)
+        ]
+        return DopplerEvent(
+            id=eid,
+            recording_id="r",
+            audio_start_s=t0,
+            audio_end_s=t0 + 60,
+            ridge_points=pts,
+            candidate_harmonic_numbers=list(range(1, nh + 1)),
+            detection_quality=q,
+        )
+
+    evs = [
+        ev(0, 100, 0.99, 5, "a"),
+        ev(900, 120, 0.9, 3, "b"),
+        ev(400, 90, 0.8, 2, "c"),
+        ev(410, 180, 0.7, 1, "c2"),
+        ev(1500, 110, 0.2, 1, "weak"),
+    ]
+    got = pick_events(evs, k=4)
+    assert [e.id for e in got[:2]] == ["a", "b"]  # pairing events first, time ordered
+    assert (
+        "c" in [e.id for e in got]
+        and "c2" not in [e.id for e in got]
+        and "weak" not in [e.id for e in got]
+    )

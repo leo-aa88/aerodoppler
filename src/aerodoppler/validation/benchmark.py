@@ -22,6 +22,7 @@ from aerodoppler.audio.service import (
     ensure_spectrogram,
     ingest_recording,
     pick_event_pair,
+    pick_events,
     propose_events,
 )
 from aerodoppler.config import Settings
@@ -347,7 +348,7 @@ def run_real_trajectory_benchmark(
             )
             ensure_spectrogram(store, settings, rec.id)
             all_events = propose_events(store, settings, rec.id)
-            events = pick_event_pair(all_events)
+            events = pick_events(all_events, k=4)
             row: dict[str, Any] = {
                 "case": cname,
                 "observer": [lat, lon],
@@ -379,7 +380,7 @@ def run_real_trajectory_benchmark(
                 req = SearchRequest(
                     mode=SearchMode.UNKNOWN_TIME,
                     recording_id=rec.id,
-                    event_ids=[events[0].id, events[1].id],
+                    event_ids=[e.id for e in events],
                     date_utc=truth["date_utc"],
                     bbox=local_bbox,
                     flight_dataset_ids=[dataset_id],

@@ -289,7 +289,7 @@ class LocationCandidate(BaseModel):
     flight_segment_ids: list[str]
     inferred_start_utc: str
     global_time_shift_s: float
-    source_fundamental_hz_per_event: list[float]
+    source_fundamental_hz_per_event: list[float | None]
     score_total: float
     score_components: ScoreComponents
     flags: list[str] = Field(default_factory=list)

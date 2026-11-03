@@ -278,3 +278,48 @@ def pick_event_pair(
         if abs(centre(e) - c1) >= min_separation_s:
             return sorted([first, e], key=lambda x: x.audio_start_s)
     return [first]
+
+
+def pick_events(
+    events: list[DopplerEvent], k: int = 4, min_separation_s: float = 60.0
+) -> list[DopplerEvent]:
+    """Up to ``k`` credible, mutually time-separated events for a multi-event Mode A search.
+
+    The first two are the pair chosen by :func:`pick_event_pair` (they drive the Δt pairing);
+    further events are added by decreasing credibility when their centre is at least
+    ``min_separation_s`` away from every event already chosen. Returned in that priority order
+    (the search keeps the first two as the pairing events).
+    """
+    pair = pick_event_pair(events, min_separation_s)
+    if len(pair) < 2:
+        return pair
+
+    from aerodoppler.search.events import robust_descent_centre
+
+    def centre(e: DopplerEvent) -> float:
+        t = np.array([p.relative_t_s for p in e.ridge_points])
+        f = np.array([p.frequency_hz for p in e.ridge_points])
+        if len(t) < 5:
+            return 0.5 * (e.audio_start_s + e.audio_end_s)
+        i, drop = robust_descent_centre(t, f)
+        return float(t[i]) if drop > 0 else 0.5 * (e.audio_start_s + e.audio_end_s)
+
+    def weight(e: DopplerEvent) -> float:
+        return (
+            (0.2 + e.detection_quality)
+            * len(e.candidate_harmonic_numbers)
+            * np.sqrt(max(len(e.ridge_points), 1))
+        )
+
+    chosen = list(pair)
+    centres = [centre(e) for e in chosen]
+    for e in sorted(events, key=weight, reverse=True):
+        if len(chosen) >= k:
+            break
+        if any(e.id == c.id for c in chosen) or e.detection_quality < 0.3:
+            continue
+        c = centre(e)
+        if all(abs(c - cc) >= min_separation_s for cc in centres):
+            chosen.append(e)
+            centres.append(c)
+    return chosen

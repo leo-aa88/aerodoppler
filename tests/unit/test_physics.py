@@ -231,3 +231,53 @@ def test_glitchy_samples_do_not_produce_supersonic_velocities():
     assert np.all(np.linalg.norm(g.vel, axis=1) <= 400.0 + 1e-6)
     pred = predict(g, FRAME.enu_to_ecef(np.zeros(3)), C, dt_s=0.5)
     assert np.all(np.isfinite(pred.factor)) and np.all(np.abs(pred.v_toward_mps) < C)
+
+
+def test_attach_extra_events_explains_matching_flight_only():
+    from aerodoppler.search.engine import attach_extra_events
+    from aerodoppler.search.events import EventFeatures
+    from aerodoppler.search.preselect import Assignment, SparseCPA
+
+    def feat(tc):
+        return EventFeatures(
+            "e",
+            tc,
+            100.0,
+            1,
+            110.0,
+            90.0,
+            1.2,
+            30.0,
+            0.5,
+            100.0,
+            tc - 50,
+            tc + 50,
+            80.0,
+            120.0,
+            1.2,
+            25.0,
+            200.0,
+            100.0,
+            15000.0,
+            10,
+            [],
+        )
+
+    feats = [feat(100.0), feat(700.0), feat(400.0)]
+    # sparse CPA entries at grid point 5: segment 7 passes at tau = t0 + 400 (match), segment 8 at t0 + 480 (no match)
+    t0 = 1_000_000.0
+    sp = SparseCPA(
+        np.array([7, 8, 7]),
+        np.array([5, 5, 6]),
+        np.zeros(3),
+        np.array([1500.0, 1500.0, 1500.0]),
+        np.array([t0 + 400.0, t0 + 480.0, t0 + 400.0]),
+        np.array([60.0, 60.0, 60.0]),
+    )
+    a = Assignment(5, (1, 2), (t0 + 100.0, t0 + 700.0), (1000.0, 1200.0), t0, 0.0)
+    b = Assignment(
+        6, (1, 2), (t0 + 100.0, t0 + 700.0), (1000.0, 1200.0), t0 + 300.0, 0.0
+    )  # at point 6 the only entry is 300 s off
+    n = attach_extra_events([a, b], sp, feats, tol_s=20.0)
+    assert a.seg_idx == (1, 2, 7) and abs(a.tau[2] - (t0 + 400.0)) < 1e-9
+    assert b.seg_idx == (1, 2, -1) and n == 1
