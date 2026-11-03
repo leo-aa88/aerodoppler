@@ -321,3 +321,64 @@ $ AERODOPPLER_OFFLINE=true uv run pytest -q -m "not network" --durations=12
 Lint: `uv run ruff check src tests` → All checks passed; `ruff format --check` → formatted.
 Network-marked test (3DEP + Copernicus online fetch) passes when run with network access
 (`uv run pytest -m network`); it is deselected offline.
+
+## Definition of done — status against SPEC §1 and §13
+
+| criterion | status |
+|---|---|
+| (a) `make demo` offline with recovered location and curve overlays | done (7.3 m Mode A on the final code; PNGs in `data/runs/demo/`) |
+| (b) ingest a real archive and own WAV/video | done (ADSB.lol 2026-11-02 Florida bbox; WAV/FLAC/MP3/video via FFmpeg; real-trace fixtures) |
+| (c) manual / automatic Doppler events | done (CLI, API, UI click-to-draw; Viterbi proposals) |
+| (d) bounded Mode A / Mode B search | done (CLI, API job, UI) |
+| (e) inspect / export / reproduce | done (JSON, GeoJSON, manifest with hashes/URLs/git SHA/seed, zip) |
+| (f) unit, integration, e2e tests pass | done (52 offline + 1 network) |
+| fail clearly without evidence | done (abstention reasons; auth gate; DEM error; input errors) |
+| `make lint`, `make test`, `make demo` on a clean machine | lint/test/demo pass here; CI workflow provided; **Docker build not verified** (daemon DNS) |
+| screenshots from the running app in README | done (Playwright, `docs/img/ui_*.png`) |
+| real-world benchmark (10–20 consented recordings) | **not done** — no recordings available; protocol + runner implemented |
+
+## Remaining issues (truthful list)
+
+1. **No real-recording validation.** Every accuracy figure in this report is synthetic or
+   semi-synthetic. Scores stay labelled "relative fit score (uncalibrated)" and
+   `estimated_uncertainty_m` is a score-landscape radius, not a confidence region.
+2. **Dense GA traffic defeats two-event evidence.** In the Daytona semi-synthetic case (four
+   flybys within 1.1 km in ten minutes) the auto-detected events are composites and the search
+   returns a false match (flagged ambiguous, low score). Multi-event Mode A (implemented) did not
+   rescue this case; better ridge separation for overlapping aircraft and operator-curated
+   events are the next steps. Pattern-work aircraft (repeated circuits) produce comb-like CPA
+   sequences that match many two-event separations.
+3. **Performance at real traffic density.** ~20 min and 3–4 GB RSS for a 36×33 km box with
+   ~1,250 segments (all pairs screened). Batching the forward model across candidates and
+   replacing per-candidate Python objects would give an order of magnitude; national-scale
+   search is opt-in and not optimised.
+4. **Docker image build unverified** in this environment (daemon DNS); compose file publishes
+   on localhost only.
+5. **Single straight flyby, known time** is inherently along-track/mirror ambiguous (documented).
+6. **Propagation physics** is limited to a constant speed of sound (temperature-adjustable);
+   wind, refraction and terrain occlusion are uncertainty terms only.
+7. **OpenSky provider** not implemented (needs approved access); provider interface exists.
+8. **Aircraft type classification** is a heuristic table; unknown types are never excluded.
+9. The UI has no authentication and must stay on localhost; SSE progress is a 1 s poll.
+
+## Next executable actions
+
+```bash
+make setup && make test-fast && make demo        # verify locally (offline)
+uv run aerodoppler benchmark --out data/runs/benchmark_synthetic            # synthetic suite
+uv run aerodoppler benchmark --manifest docs/benchmark_manifest_example.json  # real recordings (edit first)
+```
+
+## Exact local startup
+
+```bash
+make setup                      # Python deps (uv)
+make web-install && make web-build   # optional UI
+make demo                       # offline SYNTHETIC end-to-end, writes data/runs/demo/
+make serve                      # http://127.0.0.1:8000 (UI + API docs at /docs)
+uv run aerodoppler flights import --provider adsblol --date 2026-11-02 --bbox -81.8,28.6,-80.8,29.6 --confirm-download
+uv run aerodoppler audio ingest my.wav --date 2026-11-02 --authorized
+uv run aerodoppler audio detect <rec-id>
+uv run aerodoppler search --recording <rec-id> --mode unknown-time --date 2026-11-02 --bbox -81.3,28.9,-81.0,29.2 --events <e1>,<e2> --authorized
+uv run aerodoppler results export <run-id> --format geojson
+```
