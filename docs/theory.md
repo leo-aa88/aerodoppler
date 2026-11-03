@@ -54,7 +54,11 @@ delayed CPA at every grid point, kept only within the slant-range bounds (sparse
   `Δt` being the measured separation of the two steepest points; same-flight pairs excluded.
 * **Mode B** (known time): `|tau - (t0 + s_event)| ≤ sigma_t0 + tol`, one segment per event.
 
-Every stage records candidate counts.
+Every stage records candidate counts. When more Mode A pairs exist than
+`quality_settings.max_assignments` (dense real traffic: 10⁷ CPA entries for 1,300 segments over
+a 29k-point grid), the pairs kept are those with the best *slant-distance consistency prior*
+(`|log(r_geom / d_est)|` per event with `d_est = f_c v² / (c |df/dt|)` from the flight's actual
+CPA speed), never simply the first ones in grid order; a warning is attached to the run.
 
 ## Scoring (expensive stage) and the locked alignment
 
@@ -64,6 +68,12 @@ each harmonic `h` at `f = f0 (1 + α(t - t_c)) h D(t)`; the score is the harmoni
 of the robustly clipped whitened value (0 = background, 1 = one robust σ). `f0` is swept in a
 narrow band around the ridge-derived estimate `median(f_ridge / (h D))` (then polished to 0.04 %
 because the highest harmonic needs it), `α` (RPM drift) is swept with a quadratic penalty.
+
+Curve samples are **weighted by the local Doppler slope** (floor 0.3): plateaus constrain only
+the radial speed and are shared by whole families of hypotheses, whereas the CPA transition and
+any manoeuvre-induced wiggle constrain distance and timing. Without this weighting a straight
+distractor with a similar speed/distance ratio fitted a long-plateau event almost as well as the
+true turning flight (observed in the synthetic benchmark case `long_sep_1100`).
 
 **One shared clock origin `t0`** is swept over a small alignment window and chosen from event 1
 (SPEC default; `t0_fit="joint"` is available). Event 2 is scored at exactly that `t0`. Allowing
@@ -92,3 +102,15 @@ flag is raised when a distinct runner-up is within 0.3 z.
 * Mode A with two parallel straight tracks has a similar one-parameter family; the silence term
   and curve shapes (slant distance) break it only partially. Multiple distinct maxima are
   reported rather than hidden.
+
+## Automatic ridge detection in dense traffic
+
+The Viterbi tracker extracts the best path per iteration; with several simultaneous aircraft
+that path tends to "walk" from one aircraft's plateau to another's through noise, because a
+few small frequency steps cost less than an OFF/ON switch. Paths are therefore split wherever
+they run through sub-threshold values for longer than 1 s, pieces are re-joined only across tiny
+gaps with frequency *and* slope continuity, and harmonic groups are anchored on a base ridge
+(members must overlap it in time and show a stable small-rational frequency ratio) instead of
+being unioned transitively. The event-pair picker penalises ridges with more than one steep
+descent (merged aircraft). On a semi-synthetic recording with five real aircraft this turned a
+single 1,285 s "mega-event" into the two genuine flybys plus the plateau remnants of the others.

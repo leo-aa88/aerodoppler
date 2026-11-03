@@ -423,7 +423,7 @@ class SearchEngine:
             f0_step_fraction=q.f0_step_fraction,
             harmonics=tuple(q.harmonics),
             harmonic_weights=tuple([1.0, 0.8, 0.6, 0.45, 0.35, 0.3][: len(q.harmonics)]),
-            alphas=(-q.drift_fraction_max / 600.0, 0.0, q.drift_fraction_max / 600.0),
+            alphas=tuple(k * q.drift_fraction_max / 600.0 for k in (-1.0, -0.5, 0.0, 0.5, 1.0)),
         )
         coarse_cfg = ScoreConfig(
             f0_step_fraction=q.coarse_f0_step_fraction,

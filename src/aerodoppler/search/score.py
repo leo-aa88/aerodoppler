@@ -36,6 +36,7 @@ def _score_kernel(
     df,
     t_rel,
     D,
+    pw,
     t_c,
     win_lo,
     win_hi,
@@ -65,6 +66,7 @@ def _score_kernel(
                 al = alphas[ai]
                 acc = 0.0
                 cov = 0.0
+                wsum_pts = 0.0
                 nvalid = 0
                 nin = 0
                 for i in range(n):
@@ -72,6 +74,7 @@ def _score_kernel(
                     if tr < win_lo or tr > win_hi:
                         continue
                     nin += 1
+                    w_i = pw[i]
                     ti = (tr - t_spec0) / hop
                     if ti < 0.0 or ti > T - 1.0:
                         continue
@@ -100,15 +103,16 @@ def _score_kernel(
                             v = CLIP_LO
                         elif v > CLIP_HI:
                             v = CLIP_HI
-                        acc += hweights[hh] * v
+                        acc += hweights[hh] * v * w_i
                         if v > ON_RIDGE_Z:
-                            cov += hweights[hh]
+                            cov += hweights[hh] * w_i
                         point_ok = True
                     if point_ok:
                         nvalid += 1
-                if nvalid > 0 and nin > 0:
-                    scores[si, ki, ai] = acc / (nvalid * wsum)
-                    coverage[si, ki, ai] = cov / (nvalid * wsum)
+                        wsum_pts += w_i
+                if nvalid > 0 and nin > 0 and wsum_pts > 0.0:
+                    scores[si, ki, ai] = acc / (wsum_pts * wsum)
+                    coverage[si, ki, ai] = cov / (wsum_pts * wsum)
                     valid[si, ki, ai] = nvalid / nin
     return scores, coverage, valid
 
@@ -170,6 +174,7 @@ class ScoreConfig:
     f0_halfwidth_fraction: float = 0.03  # sweep ± this around the ridge-derived f0 estimate
     f0_polish_step_fraction: float = 0.0004  # second-pass fine f0 step (0 disables)
     f0_polish_top_shifts: int = 8
+    slope_weight_floor: float = 0.3  # weight of plateau samples relative to the steepest sample
     alphas: tuple[float, ...] = (-2e-5, 0.0, 2e-5)
     alpha_penalty_z: float = 0.25  # penalty at |alpha| = max(alphas), quadratic
     harmonics: tuple[int, ...] = (1, 2, 3, 4)
@@ -264,6 +269,15 @@ def score_event_curve(
         f0s = est[:, None] * rel[None, :]
     harmonics = np.asarray(cfg.harmonics, dtype=np.float64)
     hw = np.asarray(cfg.harmonic_weights[: len(cfg.harmonics)], dtype=np.float64)
+    # information weighting: plateaus (|dD/dt| ~ 0) constrain only the radial speed, the CPA
+    # transition constrains distance and timing; weight = floor + slope-proportional term
+    if len(t_rel) >= 3:
+        dD = np.abs(np.gradient(curve.factor, t_rel))
+        pw = cfg.slope_weight_floor + (1.0 - cfg.slope_weight_floor) * dD / max(
+            float(dD.max()), 1e-12
+        )
+    else:
+        pw = np.ones(len(t_rel))
     args = (
         spec.whitened,
         float(spec.times[0]),
@@ -272,6 +286,7 @@ def score_event_curve(
         spec.df_hz,
         t_rel,
         curve.factor,
+        pw,
         ev.t_center_s,
         ev.t_start_s,
         ev.t_end_s,
