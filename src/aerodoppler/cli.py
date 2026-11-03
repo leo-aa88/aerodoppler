@@ -691,6 +691,11 @@ def benchmark(
     ),
     seeds: str = typer.Option("1", "--seeds"),
     snr_db: float = typer.Option(10.0, "--snr-db"),
+    max_assignments: int = typer.Option(
+        200_000,
+        "--max-assignments",
+        help="cap on Mode A pairs per search (consistency-prior selection when exceeded)",
+    ),
 ) -> None:
     """Run the SYNTHETIC benchmark (default), the semi-synthetic real-trajectory benchmark, or a real-recording manifest benchmark."""
     from aerodoppler.validation.benchmark import (
@@ -717,6 +722,7 @@ def benchmark(
             seeds=tuple(int(x) for x in seeds.split(",")),
             snr_db=snr_db,
             log=echo,
+            max_assignments=max_assignments,
         )
     elif manifest is not None:
         rep = run_manifest_benchmark(s, manifest, out, workers=workers, log=echo)

@@ -303,6 +303,7 @@ def run_real_trajectory_benchmark(
     seeds: tuple[int, ...] = (1,),
     snr_db: float = 10.0,
     log=print,
+    max_assignments: int = 200_000,
 ) -> dict[str, Any]:
     """Semi-synthetic benchmark: simulated audio of REAL ADS-B trajectories at known observer
     positions, searched against all real traffic of the day with the real DEM."""
@@ -383,7 +384,9 @@ def run_real_trajectory_benchmark(
                     bbox=local_bbox,
                     flight_dataset_ids=[dataset_id],
                     operator_authorized=True,
-                    quality_settings=QualitySettings(workers=workers),
+                    quality_settings=QualitySettings(
+                        workers=workers, max_assignments=max_assignments
+                    ),
                     seed=seed,
                 )
                 try:

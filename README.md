@@ -49,7 +49,9 @@ Full test suite including the slow end-to-end and API tests (~10 min):
 make test
 ```
 
-Docker (port published on 127.0.0.1 only):
+Docker (port published on 127.0.0.1 only). Note: the image build could not be verified in the
+development environment (the Docker daemon there cannot resolve registry hostnames); the
+Dockerfile mirrors the tested local install steps.
 
 ```bash
 docker compose up --build
@@ -119,8 +121,11 @@ details and the known degeneracies.
 
 * One ADSB.lol day ≈ 3.3–3.5 GB download (cached); a 1°×1° bbox normalises to ≈ 8 MB Parquet.
 * DEM tiles: a 0.3°×0.3° 3DEP export ≈ 5 MB; Copernicus 1° tiles 1–45 MB each.
-* A bounded search (0.5°×0.36° bbox, two events, 5–1,300 segments) takes 1.5–5 min on 6–8 cores
-  and ~1 GB RSS; national-scale search is opt-in and not optimised.
+* A bounded search with few flights (synthetic demo: 0.5°×0.36° bbox, 5 segments) takes 1.5–2.5
+  min on 6–8 cores and ~1 GB RSS. With real traffic (1,300 segments in a 36×33 km box, ~10⁷ CPA
+  entries) the Mode A pair cap (`quality_settings.max_assignments`, default 200,000, selected by
+  a physical consistency prior when exceeded) dominates: ~25 min on 6 cores and ~2.3 GB RSS at the
+  default cap, ~8 min at 60,000. National-scale search is opt-in and not optimised.
 
 ## Data attribution and licences
 

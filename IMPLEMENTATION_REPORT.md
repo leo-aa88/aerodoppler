@@ -198,3 +198,36 @@ and the demo use ±5–10 s and check that the truth is among the leading distin
   tests, slow synthetic end-to-end, web build), docs (theory, data sources, privacy).
 * Screenshots in `docs/img/ui_*.png` were taken from the running application with Playwright
   (`scripts/screenshots.py`).
+
+## M7 — Validation and performance (in progress; see final section for results)
+
+Issues found and fixed while running the benchmarks (each verified by re-running the case):
+
+1. **Dense real traffic made the CPA stage impractical.** 1,323 real segments × 29k grid points
+   with the numpy broadcast CPA took > 45 min. A numba kernel plus 10 s trajectory subsampling
+   for the coarse screen (refinement keeps the full track) brought it to 18 s; the subsampled CPA
+   differs from the exact one by < 5 m / < 0.1 s on the test track (`test_numba_cpa_kernel…`).
+2. **Pair cap bias.** With 10.2 M CPA entries the 200k assignment cap truncated pairs in grid
+   order. Pairing is now vectorised and, when capped, keeps the pairs with the best slant-distance
+   consistency prior; the run carries a warning.
+3. **Detector in multi-aircraft audio.** On a semi-synthetic recording with five real aircraft the
+   Viterbi path bridged between aircraft and the transitive harmonic grouping produced one
+   1,285 s "mega-event" (and 21 fragments), which also made every curve evaluation 48 ms.
+   Fixes: split paths at > 1 s sub-threshold stretches, re-join only across ≤ 1.5 s gaps with
+   frequency and slope continuity, base-anchored harmonic groups with time-overlap requirement,
+   shape-aware event-pair picking, and ≤ 600 curve samples per event. Result: the two genuine
+   flybys (Δt 754 s, matching the truth) are the chosen pair.
+4. **False match in synthetic case `long_sep_1100`.** The straight first flight has an along-track
+   × clock degeneracy; a straight distractor then fitted the second event's long plateaus nearly
+   as well as the true turning flight (rank 1 at 15.5 km, truth rank 2 at 49 m, flagged
+   "ambiguous"). Fixes: curve samples weighted by local Doppler slope (plateaus 0.3, transition 1)
+   and a 5-point RPM-drift grid. Re-run of the same recording: truth rank 1 at **7 m**, score 4.31
+   vs 3.64 for the distractor pair (gap 0.67 z, no longer ambiguous).
+
+**Blocker (environment): Docker image build.** `docker build` fails in this WSL2 environment
+because the Docker daemon cannot resolve registry hostnames (`lookup registry-1.docker.io on
+10.255.255.254:53: i/o timeout`, same for ghcr.io). The `Dockerfile`/`docker-compose.yml` are
+provided and follow the tested local install steps, but the container run has **not** been
+verified here. The "clean machine" evidence is instead the GitHub Actions workflow
+(`.github/workflows/ci.yml`: uv sync, lint, fast + slow offline tests, web build) and the
+documented quick start.
