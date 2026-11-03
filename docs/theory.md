@@ -80,9 +80,28 @@ true turning flight (observed in the synthetic benchmark case `long_sep_1100`).
 event 2 its own shift would let a geometrically inconsistent flight pair score as well as the
 truth — see `tests/unit/test_locked_scoring.py`.
 
-Total = mean per-event score − soft silence penalty (other audible-range flights between the
+Three further terms were added after false matches on real traffic (see the implementation
+report, M7):
+
+* **excursion penalty** `6·|log(R_pred/R_obs)|` where `R_obs` is the observed plateau ratio
+  `f_max/f_min` of the ridge and `R_pred = max D / min D` of the predicted curve over the event
+  window — a velocity-plausibility check that stops far-away (nearly flat) predicted curves from
+  "fitting" a ridge that visibly sweeps by tens of percent;
+* **coverage penalty** `3·max(0, 0.4 − coverage)` per event;
+* **imbalance**: `combined = mean − 0.5·(max − min)/2` so one perfectly fitted event cannot carry
+  a failed one (the signature of every false match observed: 7.2 / 1.1).
+
+Total = combined − soft silence penalty (other audible-range flights between the
 events with no ridge evidence, weighted by audibility and aircraft class, capped) − drift penalty
 + small class prior (jets −0.4; unknown type −0.1, never excluded).
+
+## Search funnel
+
+With real traffic the number of Mode A pairs reaches 5·10⁵; the funnel is: ultra-coarse screen
+of **every** pair (2 harmonics, 3 f0 values, 4 s shift step, ≤150 curve samples, ~1.5 ms per
+pair) → top 40,000 → coarse (3 harmonics, 1.5 % f0 step, 2 s shifts) → top 400 → fine (full
+sweep, drift, silence) → top 5 distinct basins → 100 m / 25 m refinement. Candidate counts for
+every stage are reported with the result.
 
 ## Refinement, ranking, abstention
 
