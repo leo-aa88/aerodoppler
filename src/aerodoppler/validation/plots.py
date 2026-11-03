@@ -68,6 +68,7 @@ def plot_candidate_map(
     truth: tuple[float, float] | None,
     title: str,
     synthetic: bool = False,
+    bbox: tuple[float, float, float, float] | list[float] | None = None,
 ) -> Path:
     fig, ax = plt.subplots(figsize=(9, 8))
     if len(lat):
@@ -82,8 +83,25 @@ def plot_candidate_map(
         ax.plot(truth[1], truth[0], "kx", ms=12, mew=1.0)
     ax.set_xlabel("longitude")
     ax.set_ylabel("latitude")
-    ax.set_title(("SYNTHETIC DEMO — " if synthetic else "") + title)
+    import textwrap
+
+    ax.set_title(
+        "\n".join(textwrap.wrap(("SYNTHETIC DEMO — " if synthetic else "") + title, 80)),
+        fontsize=10,
+    )
     ax.legend(fontsize=7, loc="best")
+    if bbox is not None:
+        pad_lon, pad_lat = 0.05 * (bbox[2] - bbox[0]), 0.05 * (bbox[3] - bbox[1])
+        ax.set_xlim(bbox[0] - pad_lon, bbox[2] + pad_lon)
+        ax.set_ylim(bbox[1] - pad_lat, bbox[3] + pad_lat)
+        ax.plot(
+            [bbox[0], bbox[2], bbox[2], bbox[0], bbox[0]],
+            [bbox[1], bbox[1], bbox[3], bbox[3], bbox[1]],
+            "--",
+            color="grey",
+            lw=0.8,
+            label="search bbox",
+        )
     ax.set_aspect(1.0 / np.cos(np.radians(np.mean(lat) if len(lat) else 0.0)))
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)

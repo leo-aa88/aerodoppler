@@ -234,6 +234,7 @@ def _plots(
         (truth["observer_lat"], truth["observer_lon"]),
         f"{tag}: score landscape, flight tracks, predicted vs true receiver{err}",
         synthetic=True,
+        bbox=res.request.bbox.as_tuple() if res.request.bbox else None,
     )
     # observed vs predicted curves for the best candidate
     if res.candidates:

@@ -354,12 +354,29 @@ def open_dem_for_bbox(
     """Find or fetch DEM coverage for a bbox: local tiles first, then 3DEP (US), then Copernicus."""
     tiles = sorted(dem_dir.glob("*.tif")) if dem_dir.exists() else []
     if tiles:
-        try:
-            dem = GeoTiffDEM(tiles, source="local_geotiff")
-            if dem.covers(bbox):
-                return dem
-        except DEMError:
-            pass
+        # use only tiles that intersect the bbox so that unrelated (e.g. synthetic demo) tiles
+        # neither serve points nor taint the provenance flags
+        covering = []
+        for p in tiles:
+            try:
+                with rasterio.open(p) as ds:
+                    b = ds.bounds
+                if (
+                    b.left <= bbox.east
+                    and b.right >= bbox.west
+                    and b.bottom <= bbox.north
+                    and b.top >= bbox.south
+                ):
+                    covering.append(p)
+            except Exception:
+                continue
+        if covering:
+            try:
+                dem = GeoTiffDEM(covering, source="local_geotiff")
+                if dem.covers(bbox):
+                    return dem
+            except DEMError:
+                pass
     in_conus = (
         -125.5 <= bbox.west and bbox.east <= -66.0 and 24.0 <= bbox.south and bbox.north <= 49.5
     )

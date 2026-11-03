@@ -126,3 +126,75 @@ Tests (observed): `uv run pytest -q -m "not network"` → `32 passed, 1 deselect
   hum rejected, f0 priors 92.7 Hz (true 90) and 124.6 Hz (true 115; turning flight, prior is
   coarse by design). Figure: `docs/img/m3_auto_ridges_synthetic.png` (labelled SYNTHETIC).
   Noise-only input yields zero ridges (abstention path).
+
+## M3 — DSP (done)
+
+* Recording store (`jobs/store.py`, SQLite WAL: recordings, events, searches, audit),
+  `audio/service.py` (ingest with SHA-256 + preserved original + 2 kHz analysis copy,
+  spectrogram cache, automatic proposals, manual events, purge), CLI `audio ingest|spectrogram|
+  detect|add-event|events|list|purge`, API routes.
+* Detector fixes found by testing: (1) ridge pieces of one physical ridge returned by separate
+  Viterbi iterations are now merged when time-adjacent and frequency-continuous; (2) harmonic
+  numbering is duration-weighted and compares plateau continuations correctly (edge-clamped
+  interpolation); (3) the f0 prior is read at the steepest-slope point (≈ delayed CPA).
+  On the demo recording this yields exactly two events with harmonics {1..5} and {1..4}.
+* `pick_event_pair` chooses the two most credible, time-separated events for Mode A.
+* Manual annotation works through the CLI, the API (`POST /api/recordings/{id}/events`) and the
+  UI (click-to-draw ridge, harmonic number) before and independent of auto detection.
+
+## M4/M5 — Inverse search (done)
+
+`search/events.py` (features and generous speed/slant bounds), `search/preselect.py` (segment
+query by time/bbox/speed bins, trajectories, 200 m grid with DEM, sparse CPA table, Mode A pairing
+`tau_B − tau_A = Δt ± tol`, Mode B matching), `search/score.py` (numba bilinear curve scoring,
+per-shift f0 estimate from ridge points ± 3 % plus a 0.04 % polish pass, RPM-drift sweep with
+penalty, **shared t0** chosen from event 1), `search/silence.py` (soft, audibility- and
+class-weighted penalty with a per-flight log), `search/refine.py` + `rank.py` (distinct maxima,
+100 m → 25 m refinement, basin merge, landscape radius, abstention reasons, ambiguity flag),
+`search/engine.py` (fork-pool parallel coarse/fine/refine scoring, stage counters, progress,
+cancellation, run directory with result/manifest/heatmap/curves/tracks).
+
+Performance decisions (measured): the first fine stage swept ~100 f0 values × 81 shifts × 3
+drifts over 2400 curve points (150 ms/candidate); replacing the f0 sweep by the ridge-derived
+estimate (±3 %), sampling curves at 0.5 s and a 1 s shift step brought it to ~40 ms, and the
+refinement was parallelised. Demo Mode A end to end: 90–130 s on 6–8 workers (16-core WSL2).
+
+Evidence (observed, `aerodoppler demo`, fully offline, SYNTHETIC two-aircraft scenario with three
+distractors, 60 Hz hum, gusts, SNR 10 dB at CPA, synthetic DEM, baro-offset ADS-B samples):
+
+```
+[demo] mode_a: abstained=False best error 19.6 m, score 3.392 (relative fit score (uncalibrated)),
+       inferred start 2026-09-08T14:07:13.240306Z (truth 2026-09-08T14:07:13.000000Z)
+[demo] mode_b: abstained=False best error 187.4 m, score 4.6, inferred start 2026-09-08T14:07:10Z (truth …13Z)
+```
+
+(an earlier run of the same demo with seed 7 gave 48.8 m / 108.6 m; differences come from the
+coarse grid phase and the 25 m refinement, both reported as `nominal_grid_spacing_m`).
+Figures: `data/runs/demo/mode_a_map.png`, `mode_a_curves_best.png`, `mode_b_*`,
+`spectrogram_detected_ridges.png` (copied to `docs/img/` for the README).
+
+Locked-alignment regression (`tests/unit/test_locked_scoring.py`): a flight pair whose second CPA
+is 60 s inconsistent with the observed Δt scores 0.6–1.5 z lower than the truth with the shared t0,
+while an independent shift of event 2 would recover the full ridge score (the forbidden
+procedure would make the wrong pair indistinguishable).
+
+Known degeneracy (documented in `docs/theory.md`): a single straight flyby with known time is
+ambiguous along-track by ±σ_clock·v and mirror-ambiguous across the track; the integration test
+and the demo use ±5–10 s and check that the truth is among the leading distinct candidates.
+
+## M6 — Productization (done)
+
+* FastAPI (`api/`) with all SPEC §11 routes (+ tracks, heatmap, audit, SSE progress), strict
+  pydantic validation, id sanitisation, upload/duration limits, localhost default, no-referrer /
+  no-store headers, static serving of the Next.js export.
+* Subprocess job runner with persistent status, cooperative cancel + SIGTERM escalation,
+  concurrency cap, CPU seconds / peak RSS.
+* Next.js 15 static export (`web/`): Import, Spectrogram lab (Plotly heatmap, click-to-draw ridge,
+  harmonic overlay, Δt readout), Search (Mode A/B, bbox, resource caps, SSE progress, cancel),
+  Results (MapLibre map with tracks/candidates/score landscape, ranked table, curve overlays,
+  exports), Data & privacy (purge with inline confirmation, audit log). Basemap tiles off by
+  default. SYNTHETIC banners wherever synthetic data is shown.
+* Dockerfile + docker-compose (port published on 127.0.0.1 only), GitHub Actions CI (lint, fast
+  tests, slow synthetic end-to-end, web build), docs (theory, data sources, privacy).
+* Screenshots in `docs/img/ui_*.png` were taken from the running application with Playwright
+  (`scripts/screenshots.py`).

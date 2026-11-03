@@ -75,3 +75,48 @@ def test_detector_abstains_on_noise_only():
     spec = compute_spectrogram(x, 2000)
     ridges = detect_ridges(spec, DetectorConfig())
     assert ridges == []
+
+
+def test_pick_event_pair_prefers_time_separated_credible_events():
+    from aerodoppler.audio.service import pick_event_pair
+    from aerodoppler.models import DopplerEvent, RidgePoint
+
+    def ev(t0, f, q, nh):
+        pts = [
+            RidgePoint(relative_t_s=t0 + i, frequency_hz=f - 0.1 * i, uncertainty_hz=1.0)
+            for i in range(60)
+        ]
+        return DopplerEvent(
+            id=f"e{t0}",
+            recording_id="r",
+            audio_start_s=t0,
+            audio_end_s=t0 + 60,
+            ridge_points=pts,
+            candidate_harmonic_numbers=list(range(1, nh + 1)),
+            detection_quality=q,
+        )
+
+    a = ev(0, 100.0, 0.99, 5)  # strongest
+    frag = ev(5, 200.0, 0.4, 1)  # overlapping fragment of the same flyby
+    b = ev(900, 120.0, 0.9, 3)
+    pair = pick_event_pair([frag, b, a])
+    assert [e.id for e in pair] == ["e0", "e900"]
+    assert len(pick_event_pair([a, frag])) == 1  # no time-separated partner
+    assert pick_event_pair([]) == []
+
+
+def test_merge_adjacent_ridge_pieces():
+    import numpy as np
+
+    from aerodoppler.audio.ridges import Ridge, _merge_adjacent
+
+    t1 = np.arange(0.0, 50.0, 0.25)
+    t2 = np.arange(51.0, 100.0, 0.25)
+    r1 = Ridge(np.arange(len(t1)), t1, 100.0 - 0.1 * t1, np.full(len(t1), 5.0), 5.0, 50.0, 5.0, 1.0)
+    r2 = Ridge(np.arange(len(t2)), t2, 100.0 - 0.1 * t2, np.full(len(t2), 4.0), 4.0, 49.0, 5.0, 1.0)
+    far = Ridge(
+        np.arange(len(t2)), t2, 300.0 - 0.1 * t2, np.full(len(t2), 4.0), 4.0, 49.0, 5.0, 1.0
+    )
+    merged = _merge_adjacent([r1, r2, far], hop=0.25, df=0.244, max_gap_s=6.0, max_df_bins=6.0)
+    assert len(merged) == 2
+    assert merged[0].times[-1] == t2[-1] and len(merged[0].times) == len(t1) + len(t2)
