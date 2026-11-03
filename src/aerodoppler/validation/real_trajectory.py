@@ -17,7 +17,6 @@ from typing import Any
 
 import numpy as np
 import polars as pl
-from scipy.interpolate import CubicSpline
 
 from aerodoppler.adsb.index import FlightDataset, FlightIndex
 from aerodoppler.adsb.segments import trajectory_from_samples
