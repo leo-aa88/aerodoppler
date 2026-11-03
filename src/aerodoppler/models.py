@@ -226,8 +226,10 @@ class QualitySettings(BaseModel):
     coarse_t0_step_s: float = 2.0
     coarse_f0_step_fraction: float = 0.015
     coarse_keep_top: int = 400
+    ultra_keep_top: int = 40_000  # pairs surviving the ultra-coarse screen (all pairs scored)
+    ultra_t0_step_s: float = 4.0
     max_segments: int = 1500
-    max_assignments: int = 200_000
+    max_assignments: int = 2_000_000
     workers: int = 0  # 0 = cpu_count - 1
     ground_elevation_m: float | None = None  # explicit fallback when no DEM is available
     ground_elevation_sigma_m: float | None = None

@@ -98,6 +98,8 @@ class EngineContext:
     silence: bool
     silence_audible_m: float
     curve_dt_s: float = 0.5
+    ultra_cfg: ScoreConfig | None = None
+    ultra_step_s: float = 4.0
     assignments: list[Assignment] = field(default_factory=list)
     extra_tasks: list[tuple[Assignment, np.ndarray]] = field(default_factory=list)
 
@@ -129,13 +131,11 @@ class ScoredAssignment:
 _CTX: EngineContext | None = None
 
 
-def _t0_candidates(ctx: EngineContext, t0_center: float, coarse: bool) -> np.ndarray:
-    if ctx.mode == SearchMode.KNOWN_TIME:
-        half = ctx.sigma_t0
-        step = ctx.coarse_step_s if coarse else ctx.step_s
-    else:
-        half = ctx.sweep_s
-        step = ctx.coarse_step_s if coarse else ctx.step_s
+def _t0_candidates(
+    ctx: EngineContext, t0_center: float, coarse: bool, ultra: bool = False
+) -> np.ndarray:
+    half = ctx.sigma_t0 if ctx.mode == SearchMode.KNOWN_TIME else ctx.sweep_s
+    step = ctx.ultra_step_s if ultra else (ctx.coarse_step_s if coarse else ctx.step_s)
     n = int(np.floor(half / step))
     return t0_center + step * np.arange(-n, n + 1)
 
@@ -146,16 +146,21 @@ def _score_point(
     observer_ecef: np.ndarray,
     coarse: bool,
     taus: tuple[float, ...] | None = None,
+    ultra: bool = False,
 ) -> LockedResult:
-    cfg = ctx.coarse_cfg if coarse else ctx.score_cfg
+    if ultra:
+        cfg = ctx.ultra_cfg or ctx.coarse_cfg
+    else:
+        cfg = ctx.coarse_cfg if coarse else ctx.score_cfg
     curves, inputs = [], []
     taus = taus or assignment.tau
     for e, (si, tau, f) in enumerate(zip(assignment.seg_idx, taus, ctx.feats, strict=True)):
         traj = ctx.segments[si].traj_build.trajectory
         assert traj is not None
         half = 0.5 * (f.t_end_s - f.t_start_s) + 30.0
-        # at most ~600 curve samples per event: long events are sampled more coarsely
-        dt = max(ctx.curve_dt_s, (2.0 * half) / 600.0)
+        # at most ~600 curve samples per event (150 in the ultra-coarse screen)
+        max_pts = 150.0 if ultra else 600.0
+        dt = max(2.0 if ultra else ctx.curve_dt_s, (2.0 * half) / max_pts)
         curves.append(predicted_curve(traj, observer_ecef, ctx.c.c_mps, tau, half, dt))
         ev = ctx.events[e]
         inputs.append(
@@ -174,18 +179,18 @@ def _score_point(
             )
         )
     t0c = assignment.t0_center if ctx.mode == SearchMode.UNKNOWN_TIME else float(ctx.t0_known)
-    return locked_score(ctx.spec, curves, inputs, _t0_candidates(ctx, t0c, coarse), cfg)
+    return locked_score(ctx.spec, curves, inputs, _t0_candidates(ctx, t0c, coarse, ultra), cfg)
 
 
-def _worker_score(args: tuple[int, bool]) -> tuple[int, LockedResult]:
-    i, coarse = args
+def _worker_score(args: tuple[int, int]) -> tuple[int, LockedResult]:
+    i, level = args  # level: 0 = fine, 1 = coarse, 2 = ultra-coarse
     assert _CTX is not None
     if i >= 0:
         a = _CTX.assignments[i]
         x = _CTX.grid.observer_ecef[a.point_idx]
     else:  # refinement task
         a, x = _CTX.extra_tasks[-1 - i]
-    r = _score_point(_CTX, a, x, coarse)
+    r = _score_point(_CTX, a, x, coarse=level >= 1, ultra=level == 2)
     r.shift_scores = np.empty(0)  # keep the pickled payload small
     r.shifts = np.empty(0)
     return i, r
@@ -454,16 +459,48 @@ class SearchEngine:
             assignments=assignments,
         )
 
+        # ---- ultra-coarse screen (every pair; ~10 µs each) ----------------------------------
+        ctx.ultra_cfg = ScoreConfig(
+            f0_step_fraction=0.03,
+            f0_halfwidth_fraction=0.03,
+            harmonics=tuple(q.harmonics[:2]),
+            harmonic_weights=(1.0, 0.8)[: len(q.harmonics[:2])],
+            alphas=(0.0,),
+            f0_polish_step_fraction=0.0,
+        )
+        ctx.ultra_step_s = q.ultra_t0_step_s
+        coarse_idx = list(range(len(assignments)))
+        if len(assignments) > q.ultra_keep_top:
+            t_u = time.perf_counter()
+            ultra_results = self._parallel_scores(
+                ctx, coarse_idx, coarse=True, workers=q.workers, ultra=True
+            )
+            ultra_scores = np.array([r.combined if r is not None else -9.0 for r in ultra_results])
+            coarse_idx = [
+                int(i)
+                for i in np.argsort(-ultra_scores)[: q.ultra_keep_top]
+                if ultra_scores[i] > -5
+            ]
+            self.counters.append(
+                StageCounter(
+                    stage="ultra_coarse_screen",
+                    candidates_in=len(assignments),
+                    candidates_out=len(coarse_idx),
+                    note=f"all pairs scored with 2 harmonics, 3 f0 values, t0 step {q.ultra_t0_step_s}s, <=150 curve samples; top {q.ultra_keep_top} kept",
+                    elapsed_s=round(time.perf_counter() - t_u, 2),
+                )
+            )
+            self._stage(
+                "ultra_coarse_screened", kept=len(coarse_idx), best=float(np.max(ultra_scores))
+            )
         # ---- coarse scoring -------------------------------------------------------------
         t_c = time.perf_counter()
-        coarse_results = self._parallel_scores(
-            ctx, list(range(len(assignments))), coarse=True, workers=q.workers
-        )
+        coarse_results = self._parallel_scores(ctx, coarse_idx, coarse=True, workers=q.workers)
         coarse_scores = np.array([r.combined if r is not None else -9.0 for r in coarse_results])
         self.counters.append(
             StageCounter(
                 stage="coarse_scoring",
-                candidates_in=len(assignments),
+                candidates_in=len(coarse_idx),
                 candidates_out=int(np.sum(np.isfinite(coarse_scores) & (coarse_scores > -5))),
                 note=f"t0 step {q.coarse_t0_step_s}s, f0 step {q.coarse_f0_step_fraction:.3f}",
                 elapsed_s=round(time.perf_counter() - t_c, 2),
@@ -639,7 +676,13 @@ class SearchEngine:
 
     # ---- scoring helpers ---------------------------------------------------------------
     def _parallel_scores(
-        self, ctx: EngineContext, idx: list[int], coarse: bool, workers: int, extra: bool = False
+        self,
+        ctx: EngineContext,
+        idx: list[int],
+        coarse: bool,
+        workers: int,
+        extra: bool = False,
+        ultra: bool = False,
     ) -> list[LockedResult | None]:
         """Score assignments (idx >= 0) or refinement tasks (idx < 0 → ctx.extra_tasks) in a
         fork-based pool sharing the spectrogram; returns results positioned by index."""
@@ -648,14 +691,16 @@ class SearchEngine:
         n_out = len(ctx.extra_tasks) if extra else len(ctx.assignments)
         out: list[LockedResult | None] = [None] * n_out
         n_workers = workers or max(1, mp.cpu_count() - 1)
-        tasks = [(i, coarse) for i in idx]
+        level = 2 if ultra else (1 if coarse else 0)
+        tasks = [(i, level) for i in idx]
         done = 0
-        label = (
-            "coarse_scoring_progress"
-            if coarse
-            else ("refine_progress" if extra else "fine_scoring_progress")
-        )
-        every = 2000 if coarse else 100
+        if ultra:
+            label = "ultra_coarse_progress"
+        elif coarse:
+            label = "coarse_scoring_progress"
+        else:
+            label = "refine_progress" if extra else "fine_scoring_progress"
+        every = 20000 if ultra else (2000 if coarse else 100)
 
         def put(i: int, r: LockedResult) -> None:
             out[(-1 - i) if i < 0 else i] = r
