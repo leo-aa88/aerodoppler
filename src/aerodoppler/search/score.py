@@ -205,7 +205,8 @@ class EventInputs:
     ridge_t: NDArray[np.float64] | None = None  # observed ridge points (recording-relative s)
     ridge_f: NDArray[np.float64] | None = None  # observed ridge frequencies (Hz)
     ridge_harmonic: int = 1
-    plateau_ratio: float | None = None  # observed f_max/f_min of the ridge (excursion)
+    plateau_ratio: float | None = None  # observed local excursion f(c-W)/f(c+W)
+    excursion_window_s: float = 60.0  # W: the predicted excursion is measured over the same window
 
 
 @dataclass
@@ -339,9 +340,11 @@ def score_event_curve(
     # or slow flight predicts a nearly flat curve, which must not be allowed to "fit" a ridge
     # that visibly sweeps by tens of percent
     mid = len(shifts) // 2
-    inwin = (t_rel + shifts[mid] >= ev.t_start_s) & (t_rel + shifts[mid] <= ev.t_end_s)
-    if inwin.sum() >= 2:
-        excursion = float(curve.factor[inwin].max() / max(curve.factor[inwin].min(), 1e-9))
+    tr_mid = t_rel + shifts[mid]
+    if len(tr_mid) >= 2 and tr_mid[0] <= ev.t_center_s <= tr_mid[-1]:
+        d_before = float(np.interp(ev.t_center_s - ev.excursion_window_s, tr_mid, curve.factor))
+        d_after = float(np.interp(ev.t_center_s + ev.excursion_window_s, tr_mid, curve.factor))
+        excursion = max(d_before / max(d_after, 1e-9), 1.0)
     else:
         excursion = float("nan")
     return best, ka, f0s, coverage, valid, excursion

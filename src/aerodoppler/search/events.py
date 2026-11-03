@@ -37,6 +37,9 @@ class EventFeatures:
     t_end_s: float
     f0_lo_hz: float
     f0_hi_hz: float
+    excursion_local: (
+        float  # f(centre - W) / f(centre + W) on the smoothed ridge, W = EXCURSION_WINDOW_S
+    )
     v_min_mps: float
     v_max_mps: float
     d_min_m: float
@@ -54,6 +57,9 @@ def _smooth(y: np.ndarray, k: int) -> np.ndarray:
         return y.copy()
     pad = np.pad(y, (k // 2, k // 2), mode="edge")
     return np.convolve(pad, np.ones(k) / k, mode="valid")
+
+
+EXCURSION_WINDOW_S = 60.0
 
 
 def robust_descent_centre(
@@ -144,6 +150,11 @@ def measure_event(
     h = max(1, int(ev.ridge_harmonic))
     f0_lo = f_min / h / 1.03
     f0_hi = f_max / h * 1.03
+    # local excursion around the centre (robust to composite ridges whose far ends belong to
+    # another aircraft); compared with the predicted excursion over the same window in scoring
+    f_before = float(np.interp(t_center - EXCURSION_WINDOW_S, t, fs))
+    f_after = float(np.interp(t_center + EXCURSION_WINDOW_S, t, fs))
+    excursion_local = max(f_before / max(f_after, 1e-6), 1.0)
     return EventFeatures(
         event_id=ev.id or "",
         t_center_s=t_center,
@@ -159,6 +170,7 @@ def measure_event(
         t_end_s=float(ev.audio_end_s),
         f0_lo_hz=f0_lo,
         f0_hi_hz=f0_hi,
+        excursion_local=excursion_local,
         v_min_mps=v_min,
         v_max_mps=v_max,
         d_min_m=d_lo,
