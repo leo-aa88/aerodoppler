@@ -212,7 +212,7 @@ class QualitySettings(BaseModel):
     top_k_refine: int = 5
     event_separation_tolerance_s: float = 20.0
     alignment_sweep_s: float = 20.0
-    alignment_step_s: float = 0.5
+    alignment_step_s: float = 1.0
     f0_step_fraction: float = 0.004
     harmonics: list[int] = Field(default_factory=lambda: [1, 2, 3, 4])
     max_slant_m: float = 12000.0
@@ -223,6 +223,15 @@ class QualitySettings(BaseModel):
     drift_fraction_max: float = 0.02
     prefer_propeller_types: bool = True
     max_candidates_coarse: int = 400_000
+    coarse_t0_step_s: float = 2.0
+    coarse_f0_step_fraction: float = 0.015
+    coarse_keep_top: int = 400
+    max_segments: int = 1500
+    max_assignments: int = 200_000
+    workers: int = 0  # 0 = cpu_count - 1
+    ground_elevation_m: float | None = None  # explicit fallback when no DEM is available
+    ground_elevation_sigma_m: float | None = None
+    mic_height_m: float = 1.5
 
 
 class SearchRequest(BaseModel):

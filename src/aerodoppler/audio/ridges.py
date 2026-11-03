@@ -235,7 +235,6 @@ def _group_harmonics(ridges: list[Ridge], tol: float) -> None:
             p, q = best  # fb/fa ≈ p/q  → fa ∝ q, fb ∝ p
             if b.group < 0:
                 b.group = a.group
-                a.harmonic, b.harmonic = _merge_harmonics(a.harmonic, q, p)
             elif a.group != b.group:
                 # merge groups
                 old = b.group
@@ -280,17 +279,11 @@ def _group_harmonics(ridges: list[Ridge], tol: float) -> None:
 
 
 def _ratio_to(r: Ridge, base: Ridge) -> float:
-    """Median frequency ratio r/base over their common time span (falls back to medians)."""
-    t0 = max(r.times[0], base.times[0])
-    t1 = min(r.times[-1], base.times[-1])
-    if t1 - t0 < 5.0:
-        return float(np.median(r.freqs) / np.median(base.freqs))
-    tt = np.arange(t0, t1, 0.5)
-    return float(np.median(np.interp(tt, r.times, r.freqs) / np.interp(tt, base.times, base.freqs)))
-
-
-def _merge_harmonics(ha: int, qa: int, pb: int) -> tuple[int, int]:
-    return qa, pb
+    """Median frequency ratio r/base evaluated at r's times. ``np.interp`` clamps to the
+    base ridge's end values, so a piece that continues a plateau after the base ridge ended
+    is compared against the plateau frequency rather than the base's global median."""
+    fb = np.interp(r.times, base.times, base.freqs)
+    return float(np.median(r.freqs / fb))
 
 
 def estimate_f0_at_steepest(
