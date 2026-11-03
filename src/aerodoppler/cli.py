@@ -691,6 +691,11 @@ def benchmark(
     ),
     seeds: str = typer.Option("1", "--seeds"),
     snr_db: float = typer.Option(10.0, "--snr-db"),
+    events_k: int = typer.Option(
+        2,
+        "--events-k",
+        help="events per Mode A search in --real-trajectories (2 = pair; >2 = multi-event, experimental)",
+    ),
     max_assignments: int = typer.Option(
         200_000,
         "--max-assignments",
@@ -723,6 +728,7 @@ def benchmark(
             snr_db=snr_db,
             log=echo,
             max_assignments=max_assignments,
+            events_k=events_k,
         )
     elif manifest is not None:
         rep = run_manifest_benchmark(s, manifest, out, workers=workers, log=echo)

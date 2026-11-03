@@ -305,6 +305,7 @@ def run_real_trajectory_benchmark(
     snr_db: float = 10.0,
     log=print,
     max_assignments: int = 200_000,
+    events_k: int = 2,
 ) -> dict[str, Any]:
     """Semi-synthetic benchmark: simulated audio of REAL ADS-B trajectories at known observer
     positions, searched against all real traffic of the day with the real DEM."""
@@ -348,7 +349,9 @@ def run_real_trajectory_benchmark(
             )
             ensure_spectrogram(store, settings, rec.id)
             all_events = propose_events(store, settings, rec.id)
-            events = pick_events(all_events, k=4)
+            events = (
+                pick_events(all_events, k=events_k) if events_k > 2 else pick_event_pair(all_events)
+            )
             row: dict[str, Any] = {
                 "case": cname,
                 "observer": [lat, lon],
