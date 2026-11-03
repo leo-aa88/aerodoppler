@@ -91,8 +91,12 @@ def test_full_flow(api):
         f"/api/recordings/{rid}/events/detect", json={"threshold_z": 2.5, "min_duration_s": 40}
     )
     assert r.status_code == 200
-    auto = sorted(r.json()["events"], key=lambda e: e["audio_start_s"])
-    assert len(auto) >= 2
+    from aerodoppler.audio.service import pick_event_pair
+    from aerodoppler.models import DopplerEvent
+
+    auto_all = [DopplerEvent.model_validate(e) for e in r.json()["events"]]
+    auto = [e.model_dump() for e in pick_event_pair(auto_all)]
+    assert len(auto) == 2
     # delete the manual one
     assert c.delete(f"/api/recordings/{rid}/events/{manual_id}").status_code == 200
     # flight datasets present (synthetic, labelled)

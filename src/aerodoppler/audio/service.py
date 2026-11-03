@@ -222,3 +222,43 @@ def spectrogram_payload(
         "params": spec.params,
         "pooled": [st, sf_],
     }
+
+
+def pick_event_pair(
+    events: list[DopplerEvent], min_separation_s: float = 60.0
+) -> list[DopplerEvent]:
+    """Choose the two most credible events with clearly distinct time windows (for Mode A).
+
+    Ranking: detection quality × number of harmonics seen × ridge length. The second event must
+    have its steepest point at least ``min_separation_s`` away from the first. Returns the
+    chosen events sorted by time (fewer than two if no such pair exists).
+    """
+    from aerodoppler.audio.ridges import estimate_f0_at_steepest  # noqa: F401  (same module family)
+
+    def centre(e: DopplerEvent) -> float:
+        t = np.array([p.relative_t_s for p in e.ridge_points])
+        f = np.array([p.frequency_hz for p in e.ridge_points])
+        if len(t) < 5:
+            return 0.5 * (e.audio_start_s + e.audio_end_s)
+        k = max(3, int(round(8.0 / max(float(np.median(np.diff(t))), 0.05))) | 1)
+        fs = np.convolve(np.pad(f, (k // 2, k // 2), mode="edge"), np.ones(k) / k, mode="valid")
+        slope = np.gradient(fs, t)
+        i = int(np.argmin(slope))
+        return float(t[i]) if slope[i] < 0 else 0.5 * (e.audio_start_s + e.audio_end_s)
+
+    def weight(e: DopplerEvent) -> float:
+        return (
+            (0.2 + e.detection_quality)
+            * len(e.candidate_harmonic_numbers)
+            * np.sqrt(max(len(e.ridge_points), 1))
+        )
+
+    ranked = sorted(events, key=weight, reverse=True)
+    if not ranked:
+        return []
+    first = ranked[0]
+    c1 = centre(first)
+    for e in ranked[1:]:
+        if abs(centre(e) - c1) >= min_separation_s:
+            return sorted([first, e], key=lambda x: x.audio_start_s)
+    return [first]

@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from aerodoppler.audio.service import ensure_spectrogram, ingest_recording, propose_events
+from aerodoppler.audio.service import (
+    ensure_spectrogram,
+    ingest_recording,
+    pick_event_pair,
+    propose_events,
+)
 from aerodoppler.config import Settings
 from aerodoppler.geo.coordinates import haversine_m
 from aerodoppler.jobs.runner import run_search_inline
@@ -37,7 +42,8 @@ def world(tmp_path_factory):
         synthetic=True,
     )
     ensure_spectrogram(store, settings, rec.id)
-    events = sorted(propose_events(store, settings, rec.id), key=lambda e: e.audio_start_s)
+    all_events = propose_events(store, settings, rec.id)
+    events = pick_event_pair(all_events)
     return {
         "settings": settings,
         "store": store,

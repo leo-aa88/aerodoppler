@@ -668,6 +668,70 @@ def demo(
     typer.echo(json.dumps(summary, indent=2, default=str))
 
 
+@app.command("benchmark")
+def benchmark(
+    out: Path = typer.Option(Path("data/runs/benchmark"), "--out"),
+    manifest: Path | None = typer.Option(
+        None,
+        "--manifest",
+        help="JSON manifest of owner-consented real recordings with surveyed coordinates",
+    ),
+    workers: int = typer.Option(0, "--workers"),
+    cases: str | None = typer.Option(
+        None, "--cases", help="comma-separated synthetic case names (default: all)"
+    ),
+    no_mode_b: bool = typer.Option(False, "--no-mode-b"),
+    real_trajectories: str | None = typer.Option(
+        None,
+        "--real-trajectories",
+        help="dataset id: semi-synthetic benchmark on REAL ADS-B tracks",
+    ),
+    observers: str | None = typer.Option(
+        None, "--observers", help="name:lat:lon;name:lat:lon for --real-trajectories"
+    ),
+    seeds: str = typer.Option("1", "--seeds"),
+    snr_db: float = typer.Option(10.0, "--snr-db"),
+) -> None:
+    """Run the SYNTHETIC benchmark (default), the semi-synthetic real-trajectory benchmark, or a real-recording manifest benchmark."""
+    from aerodoppler.validation.benchmark import (
+        SYNTHETIC_CASES,
+        run_manifest_benchmark,
+        run_real_trajectory_benchmark,
+        run_synthetic_benchmark,
+    )
+
+    s = get_settings()
+    echo = lambda m: typer.secho(m, err=True)  # noqa: E731
+    if real_trajectories:
+        obs = [
+            (p.split(":")[0], float(p.split(":")[1]), float(p.split(":")[2]))
+            for p in (observers or "").split(";")
+            if p
+        ]
+        rep = run_real_trajectory_benchmark(
+            s,
+            real_trajectories,
+            obs,
+            out,
+            workers=workers,
+            seeds=tuple(int(x) for x in seeds.split(",")),
+            snr_db=snr_db,
+            log=echo,
+        )
+    elif manifest is not None:
+        rep = run_manifest_benchmark(s, manifest, out, workers=workers, log=echo)
+    else:
+        sel = (
+            SYNTHETIC_CASES
+            if not cases
+            else [c for c in SYNTHETIC_CASES if c["name"] in set(cases.split(","))]
+        )
+        rep = run_synthetic_benchmark(
+            s, out, cases=sel, workers=workers, mode_b=not no_mode_b, log=echo
+        )
+    typer.echo(json.dumps({k: v for k, v in rep.items() if k != "cases"}, indent=2, default=str))
+
+
 def main() -> None:
     app()
 

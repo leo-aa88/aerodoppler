@@ -57,6 +57,7 @@ dev = [
   "pytest-timeout>=2.3",
   "ruff>=0.5",
   "mypy>=1.10",
+  "playwright>=1.64.1",
 ]
 
 [tool.ruff]

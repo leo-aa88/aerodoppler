@@ -1,0 +1,12 @@
+services:
+  aerodoppler:
+    build: .
+    image: aerodoppler:local
+    # publish on localhost only: the API has no authentication by design (local-first tool)
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      AERODOPPLER_OFFLINE: "false"
+      AERODOPPLER_MAX_CONCURRENT_JOBS: "2"

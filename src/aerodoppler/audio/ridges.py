@@ -39,9 +39,11 @@ class DetectorConfig:
     max_ridges: int = 12
     smooth_bins: int = 3
     harmonic_tolerance: float = 0.03
+    merge_gap_s: float = 6.0
+    merge_df_bins: float = 6.0
 
 
-@dataclass
+@dataclass(eq=False)
 class Ridge:
     frame_idx: NDArray[np.int64]
     times: NDArray[np.float64]
@@ -195,8 +197,56 @@ def detect_ridges(spec: Spectrogram, cfg: DetectorConfig | None = None) -> list[
         if not accepted_any and all((b - a) < min_frames for a, b in runs):
             break
     ridges.sort(key=lambda r: r.times[0])
+    ridges = _merge_adjacent(
+        ridges, hop, spec.df_hz, max_gap_s=cfg.merge_gap_s, max_df_bins=cfg.merge_df_bins
+    )
     _group_harmonics(ridges, cfg.harmonic_tolerance)
     return ridges
+
+
+def _merge_adjacent(
+    ridges: list[Ridge], hop: float, df: float, max_gap_s: float, max_df_bins: float
+) -> list[Ridge]:
+    """Join pieces of one physical ridge that the iterative extraction returned separately:
+    B starts within ``max_gap_s`` after A ends (or overlaps slightly) and the frequencies are
+    continuous across the junction."""
+    merged: list[Ridge] = []
+    pool = sorted(ridges, key=lambda r: r.times[0])
+    while pool:
+        a = pool.pop(0)
+        changed = True
+        while changed:
+            changed = False
+            for b in list(pool):
+                gap = b.times[0] - a.times[-1]
+                if -2 * hop <= gap <= max_gap_s:
+                    fa = a.freqs[-1] + (a.freqs[-1] - a.freqs[max(0, len(a.freqs) - 5)]) * (
+                        max(gap, 0.0) / (hop * 4)
+                    )  # linear continuation
+                    if abs(b.freqs[0] - fa) <= max_df_bins * df:
+                        keep = b.times > a.times[-1]
+                        if keep.sum() < 2:
+                            pool.remove(b)
+                            continue
+                        a = Ridge(
+                            np.concatenate([a.frame_idx, b.frame_idx[keep]]),
+                            np.concatenate([a.times, b.times[keep]]),
+                            np.concatenate([a.freqs, b.freqs[keep]]),
+                            np.concatenate([a.values, b.values[keep]]),
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                        )
+                        a.mean_z = float(a.values.mean())
+                        a.duration_s = float(len(a.times) * hop)
+                        a.freq_range_hz = float(a.freqs.max() - a.freqs.min())
+                        a.freq_std_hz = float(a.freqs.std())
+                        a.confidence = max(a.confidence, b.confidence)
+                        pool.remove(b)
+                        changed = True
+        merged.append(a)
+    return merged
 
 
 def _group_harmonics(ridges: list[Ridge], tol: float) -> None:
@@ -250,7 +300,9 @@ def _group_harmonics(ridges: list[Ridge], tol: float) -> None:
         if len(members) == 1:
             members[0].harmonic = 1
             continue
-        base = min(members, key=lambda r: float(np.median(r.freqs)))
+        longest = max(r.duration_s for r in members)
+        substantial = [r for r in members if r.duration_s >= 0.3 * longest] or members
+        base = min(substantial, key=lambda r: float(np.median(r.freqs)))
         base_f = float(np.median(base.freqs))
         ratios = np.array([_ratio_to(r, base) for r in members])
         durs = np.array([r.duration_s for r in members])

@@ -1,0 +1,27 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: uv sync --all-extras
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - name: fast tests (offline)
+        run: AERODOPPLER_OFFLINE=true uv run pytest -q -m "not slow and not network"
+      - name: slow synthetic end-to-end (offline)
+        run: AERODOPPLER_OFFLINE=true uv run pytest -q -m "slow and not network" --timeout 1800
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: cd web && npm install --no-audit --no-fund && npm run build
