@@ -148,6 +148,9 @@ class Trajectory:
         )
 
 
+MAX_PLAUSIBLE_SPEED_MPS = 400.0  # subsonic civil traffic; larger values are data glitches
+
+
 def finite_difference_velocity(
     t: NDArray[np.float64], pos: NDArray[np.float64], smooth: int = 3
 ) -> NDArray[np.float64]:
@@ -173,4 +176,11 @@ def finite_difference_velocity(
             w = np.abs(t[lo:hi] - t[i]) < 60.0
             out[i] = v[lo:hi][w].mean(axis=0)
         v = out
+    # near-duplicate timestamps with position noise can produce absurd velocities; clamp the
+    # magnitude so downstream Doppler factors stay finite and subsonic (data glitch, flagged by
+    # the segment splitter's implied-speed rule where it exceeds 350 m/s)
+    speed = np.linalg.norm(v, axis=1)
+    too_fast = speed > MAX_PLAUSIBLE_SPEED_MPS
+    if too_fast.any():
+        v[too_fast] *= (MAX_PLAUSIBLE_SPEED_MPS / speed[too_fast])[:, None]
     return v

@@ -218,3 +218,16 @@ def test_numba_cpa_kernel_matches_numpy_path_and_subsampling_is_close():
     assert len(coarse.t) < len(traj.t)
     _, r_c, tr_c = closest_approach_batch(coarse, obs, C)
     assert np.max(np.abs(r_c - r)) < 5.0 and np.max(np.abs(tr_c - tr)) < 0.1
+
+
+def test_glitchy_samples_do_not_produce_supersonic_velocities():
+    """Near-duplicate timestamps with position noise (seen in real ADSB.lol traces)."""
+    traj = straight_traj(dt=5.0)
+    t = traj.t.copy()
+    pos = traj.pos.copy()
+    t = np.insert(t, 10, t[10] + 0.02)  # a sample 20 ms after another, 30 m off
+    pos = np.insert(pos, 10, pos[10] + np.array([30.0, 0.0, 0.0]), axis=0)
+    g = Trajectory.from_ecef(t, pos)
+    assert np.all(np.linalg.norm(g.vel, axis=1) <= 400.0 + 1e-6)
+    pred = predict(g, FRAME.enu_to_ecef(np.zeros(3)), C, dt_s=0.5)
+    assert np.all(np.isfinite(pred.factor)) and np.all(np.abs(pred.v_toward_mps) < C)

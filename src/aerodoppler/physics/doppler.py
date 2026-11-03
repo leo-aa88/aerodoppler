@@ -76,6 +76,8 @@ def predict(
     r_safe = np.where(r > 1e-9, r, 1e-9)
     u = d / r_safe[:, None]
     v_toward = -np.einsum("ij,ij->i", v, u)
+    # guard against data glitches: the model is only valid for subsonic radial speeds
+    v_toward = np.clip(v_toward, -0.9 * c_mps, 0.9 * c_mps)
     t_r = te + r / c_mps
     fac = doppler_factor(v_toward, c_mps)
     return DopplerPrediction(te, t_r, fac, r, v_toward, x, c_mps)
