@@ -45,26 +45,29 @@ class RealTrajectoryCase:
     classes: tuple[str, ...] = ("piston", "turboprop", "helicopter")
 
 
-def _spline_path(traj, smooth_s: float = 12.0):
+def _spline_path(traj, lam: float = 100.0):
     """Smooth, physically plausible path through the REAL positions.
 
-    Raw ADS-B positions carry ~5–10 m jitter at a 2–5 s cadence; a cubic spline through them
-    overshoots between samples and produces velocity oscillations that show up as unphysical
-    frequency wiggles of several Hz in the synthesised audio (a real aircraft does not do that,
-    and the search's piecewise-linear model cannot reproduce it). The positions are therefore
-    averaged over ±smooth_s/2 before splining. The *search* still sees the raw samples, as in
-    reality.
+    A cubic spline *through* raw ADS-B samples (5–10 m jitter at 2–5 s cadence) implies
+    accelerations of up to ~27 m/s² (measured on a real C172 track) and produces unphysical
+    frequency wiggles of several Hz in the synthesised audio, which no flight model can
+    reproduce. A smoothing spline (``make_smoothing_spline``, λ = 100 per ECEF axis) keeps the
+    residuals within ADS-B noise (p95 ≈ 10 m) with accelerations ≈ 2 m/s² (plausible for turns).
+    The *search* still sees the raw samples, as in reality.
     """
-    t = traj.t
-    pos = traj.pos
-    sm = np.empty_like(pos)
-    half = 0.5 * smooth_s
-    for i in range(len(t)):
-        m = np.abs(t - t[i]) <= half
-        sm[i] = pos[m].mean(axis=0)
-    # keep a strictly increasing, de-duplicated time axis
-    keep = np.concatenate([[True], np.diff(t) > 0.5])
-    cs = CubicSpline(t[keep], sm[keep], axis=0, bc_type="natural", extrapolate=True)
+    from scipy.interpolate import make_smoothing_spline
+
+    keep = np.concatenate([[True], np.diff(traj.t) > 0.5])
+    t = traj.t[keep]
+    pos = traj.pos[keep]
+    sp = [make_smoothing_spline(t, pos[:, k], lam=lam) for k in range(3)]
+
+    class _CS:  # minimal callable with the same interface as CubicSpline for the path
+        def __call__(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return np.stack([s(x) for s in sp], axis=1)
+
+    cs = _CS()
 
     def path(t):
         return cs(np.asarray(t, dtype=np.float64))
