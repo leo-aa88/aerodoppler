@@ -379,17 +379,17 @@ def _ratio_to(r: Ridge, base: Ridge) -> float:
 def estimate_f0_at_steepest(
     times: NDArray[np.float64], freqs: NDArray[np.float64], smooth_s: float = 8.0
 ) -> float:
-    """Frequency at the point of steepest descent ≈ received frequency at the delayed CPA,
-    where the radial velocity (and hence the Doppler shift) is ~zero."""
+    """Frequency at the centre of the largest descent (≈ received frequency at the delayed CPA,
+    where the radial velocity and hence the Doppler shift are ~zero)."""
+    from aerodoppler.search.events import robust_descent_centre
+
     if len(times) < 5:
         return float(np.median(freqs))
     dt = float(np.median(np.diff(times))) or 0.25
     k = max(3, int(round(smooth_s / dt)) | 1)
-    kern = np.ones(k) / k
-    fs = np.convolve(np.pad(freqs, (k // 2, k // 2), mode="edge"), kern, mode="valid")
-    slope = np.gradient(fs, times)
-    i = int(np.argmin(slope))
-    if slope[i] >= 0:  # no descending part: fall back to the midpoint between extremes
+    fs = np.convolve(np.pad(freqs, (k // 2, k // 2), mode="edge"), np.ones(k) / k, mode="valid")
+    i, drop = robust_descent_centre(times, freqs)
+    if drop <= 0:  # no descending part: fall back to the midpoint between extremes
         return float(0.5 * (fs.max() + fs.min()))
     return float(fs[i])
 

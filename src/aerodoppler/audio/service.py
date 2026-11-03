@@ -236,15 +236,14 @@ def pick_event_pair(
     from aerodoppler.audio.ridges import estimate_f0_at_steepest  # noqa: F401  (same module family)
 
     def centre(e: DopplerEvent) -> float:
+        from aerodoppler.search.events import robust_descent_centre
+
         t = np.array([p.relative_t_s for p in e.ridge_points])
         f = np.array([p.frequency_hz for p in e.ridge_points])
         if len(t) < 5:
             return 0.5 * (e.audio_start_s + e.audio_end_s)
-        k = max(3, int(round(8.0 / max(float(np.median(np.diff(t))), 0.05))) | 1)
-        fs = np.convolve(np.pad(f, (k // 2, k // 2), mode="edge"), np.ones(k) / k, mode="valid")
-        slope = np.gradient(fs, t)
-        i = int(np.argmin(slope))
-        return float(t[i]) if slope[i] < 0 else 0.5 * (e.audio_start_s + e.audio_end_s)
+        i, drop = robust_descent_centre(t, f)
+        return float(t[i]) if drop > 0 else 0.5 * (e.audio_start_s + e.audio_end_s)
 
     def descents(e: DopplerEvent) -> int:
         """Number of distinct steep-descent episodes (a clean flyby has exactly one)."""

@@ -56,6 +56,28 @@ def _smooth(y: np.ndarray, k: int) -> np.ndarray:
     return np.convolve(pad, np.ones(k) / k, mode="valid")
 
 
+def robust_descent_centre(
+    t: np.ndarray, f: np.ndarray, half_window_s: float = 25.0, smooth_s: float = 6.0
+) -> tuple[int, float]:
+    """Index and strength of the centre of the largest frequency *drop* over ±half_window_s.
+
+    Using the drop over a physically sized window (a flyby transition lasts ~2d/v, tens of
+    seconds) instead of the instantaneous slope makes the estimate immune to small tracking
+    artefacts (a few-Hz jump between adjacent ridges) that otherwise dominate the slope.
+    Returns (index, drop_hz); drop_hz <= 0 means no descending transition was found.
+    """
+    n = len(t)
+    if n < 3:
+        return int(np.argmax(-f)) if n else 0, 0.0
+    dt = float(np.median(np.diff(t))) if n > 1 else 1.0
+    fs = _smooth(f, int(round(smooth_s / max(dt, 1e-3))))
+    before = np.interp(t - half_window_s, t, fs)  # clamps at the ends
+    after = np.interp(t + half_window_s, t, fs)
+    drop = before - after
+    i = int(np.argmax(drop))
+    return i, float(drop[i])
+
+
 def measure_event(
     ev: DopplerEvent,
     c_mps: float,
@@ -75,8 +97,8 @@ def measure_event(
     dt = float(np.median(np.diff(t))) if len(t) > 1 else 1.0
     fs = _smooth(f, int(round(6.0 / max(dt, 1e-3))))
     slope = np.gradient(fs, t) if len(t) > 2 else np.zeros_like(t)
-    i = int(np.argmin(slope))
-    if slope[i] >= 0:
+    i, drop = robust_descent_centre(t, f)
+    if drop <= 0:
         flags.append("no_descending_slope")
         i = int(np.argmin(np.abs(fs - 0.5 * (fs.max() + fs.min()))))
     t_center = float(t[i])
@@ -100,7 +122,15 @@ def measure_event(
         flags.append("plateaus_not_reached")
     v_min = max(v_floor_mps, speed_margin * v_r)
     v_max = min(v_ceiling_mps, max(3.0 * v_r, 120.0))
-    slope_max = float(abs(slope[i])) if slope[i] < 0 else float(np.max(np.abs(slope)))
+    # transition slope: steepest smoothed slope within ±half window of the centre
+    lo_i, hi_i = (
+        max(0, i - int(25.0 / max(dt, 1e-3))),
+        min(len(t), i + int(25.0 / max(dt, 1e-3)) + 1),
+    )
+    local = slope[lo_i:hi_i]
+    slope_max = (
+        float(-local.min()) if local.size and local.min() < 0 else float(np.max(np.abs(slope)))
+    )
     if slope_max <= 1e-4:
         flags.append("flat_ridge")
         d_lo, d_hi = d_floor_m, d_ceiling_m
