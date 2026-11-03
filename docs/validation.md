@@ -36,7 +36,11 @@ real-world geolocation accuracy, and **no real-recording benchmark has been run 
   of *real* ADSB.lol tracks (real cadence, manoeuvres, altitude datums) at known observer
   positions in the imported Florida bbox, searched against all 2,372 real airborne segments of
   2026-11-02 with the real USGS 3DEP DEM. Propagation, source spectra and noise are still
-  simulated.
+  simulated. The audio path is a **smoothing spline** (λ = 100 per ECEF axis) through the
+  real positions: a cubic spline *through* raw ADS-B samples implied accelerations up to
+  27 m/s² and produced unphysical frequency wiggles that made smooth distractor tracks fit the
+  ridges better than the true aircraft (an artefact of the generator, found and fixed during
+  M7; the search itself always uses the raw samples).
 
 Results of both runs are reported in `IMPLEMENTATION_REPORT.md` (section M7) exactly as observed,
 including failures and abstentions.
