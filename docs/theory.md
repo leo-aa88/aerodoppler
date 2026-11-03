@@ -54,6 +54,15 @@ delayed CPA at every grid point, kept only within the slant-range bounds (sparse
   `Δt` being the measured separation of the two steepest points; same-flight pairs excluded.
 * **Mode B** (known time): `|tau - (t0 + s_event)| ≤ sigma_t0 + tol`, one segment per event.
 
+**More than two events (Mode A).** The two most credible, time-separated events drive the
+pairing; every further detected event (up to four in total, `pick_events`) is then *explained*
+at each hypothesis by the flight whose delayed CPA at that grid point falls within the
+tolerance of `t0 + centre_k` and the event's speed/slant bounds (`attach_extra_events`). All
+explained events are scored at the one shared `t0`; an event that no flight explains enters
+the combination with a neutral score (archives miss aircraft) and cannot be compensated by
+the others. This removes the comb-like ambiguity created by pattern-work training aircraft,
+which can match any *two*-event separation but not three or four.
+
 Every stage records candidate counts. When more Mode A pairs exist than
 `quality_settings.max_assignments` (dense real traffic: 10⁷ CPA entries for 1,300 segments over
 a 29k-point grid), the pairs kept are those with the best *slant-distance consistency prior*
