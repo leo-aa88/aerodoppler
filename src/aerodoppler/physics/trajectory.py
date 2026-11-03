@@ -112,6 +112,27 @@ class Trajectory:
         tq = np.atleast_1d(np.asarray(t_query, dtype=np.float64))
         return self._locate(tq)[2]
 
+    def subsample(self, min_dt_s: float) -> Trajectory:
+        """Keep samples at least ``min_dt_s`` apart (always first and last); velocities are kept
+        from the dense track. Used for coarse CPA screening; errors are a few metres for
+        straight flight and tens of metres in turns, far below the coarse grid spacing."""
+        keep = [0]
+        last = self.t[0]
+        for i in range(1, len(self.t) - 1):
+            if self.t[i] - last >= min_dt_s:
+                keep.append(i)
+                last = self.t[i]
+        keep.append(len(self.t) - 1)
+        idx = np.array(sorted(set(keep)))
+        return Trajectory(
+            self.t[idx],
+            self.pos[idx],
+            self.vel[idx],
+            self.max_gap_s + min_dt_s,
+            self.segment_id,
+            self.meta,
+        )
+
     def slice(self, t_min: float, t_max: float, pad: int = 1) -> Trajectory:
         i0 = max(0, int(np.searchsorted(self.t, t_min)) - pad)
         i1 = min(len(self.t), int(np.searchsorted(self.t, t_max, side="right")) + pad)

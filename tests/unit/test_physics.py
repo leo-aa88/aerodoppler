@@ -196,3 +196,25 @@ def test_batch_cpa_matches_scalar():
         assert te[i] == pytest.approx(s.t_emit_cpa, abs=1e-6)
         assert r[i] == pytest.approx(s.slant_range_m, rel=1e-9)
         assert tr[i] == pytest.approx(s.t_receive_cpa, abs=1e-6)
+
+
+def test_numba_cpa_kernel_matches_numpy_path_and_subsampling_is_close():
+    from aerodoppler.physics.doppler import _cpa_kernel
+
+    traj = straight_traj(speed=90.0, d=1200.0, alt=700.0, dt=3.0)
+    rng = np.random.default_rng(2)
+    n = 600  # large enough to take the numba path in closest_approach_batch
+    enu = np.stack([rng.uniform(-8000, 8000, n), rng.uniform(-8000, 8000, n), np.zeros(n)], axis=1)
+    obs = FRAME.enu_to_ecef(enu)
+    te, r, tr = closest_approach_batch(traj, obs, C)
+    te_k, r_k = _cpa_kernel(traj.pos, traj.t, traj._gap <= traj.max_gap_s, obs)
+    assert np.allclose(te, te_k) and np.allclose(r, r_k)
+    for i in range(0, n, 97):
+        s = closest_approach(traj, obs[i], C)
+        assert te[i] == pytest.approx(s.t_emit_cpa, abs=1e-6) and r[i] == pytest.approx(
+            s.slant_range_m, rel=1e-9
+        )
+    coarse = traj.subsample(10.0)
+    assert len(coarse.t) < len(traj.t)
+    _, r_c, tr_c = closest_approach_batch(coarse, obs, C)
+    assert np.max(np.abs(r_c - r)) < 5.0 and np.max(np.abs(tr_c - tr)) < 0.1

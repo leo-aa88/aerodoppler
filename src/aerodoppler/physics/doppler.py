@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from numba import njit
 from numpy.typing import ArrayLike, NDArray
 
 from aerodoppler.physics.propagation import doppler_factor
@@ -116,6 +117,45 @@ def closest_approach(traj: Trajectory, observer_ecef: ArrayLike, c_mps: float) -
     )
 
 
+@njit(cache=True)
+def _cpa_kernel(pos, t, gap_ok, X):
+    """Exact closest approach of each observer in X to the piecewise-linear trajectory."""
+    M = X.shape[0]
+    N = pos.shape[0]
+    t_out = np.empty(M)
+    r_out = np.empty(M)
+    for m in range(M):
+        x0, x1, x2 = X[m, 0], X[m, 1], X[m, 2]
+        best = 1e300
+        best_t = t[0]
+        for i in range(N - 1):
+            if not gap_ok[i]:
+                continue
+            ax, ay, az = pos[i, 0] - x0, pos[i, 1] - x1, pos[i, 2] - x2
+            sx, sy, sz = (
+                pos[i + 1, 0] - pos[i, 0],
+                pos[i + 1, 1] - pos[i, 1],
+                pos[i + 1, 2] - pos[i, 2],
+            )
+            seg2 = sx * sx + sy * sy + sz * sz
+            if seg2 > 0.0:
+                s = -(ax * sx + ay * sy + az * sz) / seg2
+                if s < 0.0:
+                    s = 0.0
+                elif s > 1.0:
+                    s = 1.0
+            else:
+                s = 0.0
+            cx, cy, cz = ax + sx * s, ay + sy * s, az + sz * s
+            r2 = cx * cx + cy * cy + cz * cz
+            if r2 < best:
+                best = r2
+                best_t = t[i] + s * (t[i + 1] - t[i])
+        t_out[m] = best_t
+        r_out[m] = np.sqrt(best)
+    return t_out, r_out
+
+
 def closest_approach_batch(
     traj: Trajectory, observers_ecef: NDArray[np.float64], c_mps: float, chunk: int = 4096
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
@@ -124,6 +164,12 @@ def closest_approach_batch(
     Returns ``(t_emit_cpa, slant_range_m, t_receive_cpa)`` each of shape (M,).
     """
     X = np.asarray(observers_ecef, dtype=np.float64).reshape(-1, 3)
+    gap_ok_all = traj._gap <= traj.max_gap_s
+    if not gap_ok_all.any():
+        raise ValueError("trajectory has no gap-free segment")
+    if len(X) * len(traj.t) > 20000:  # numba path for large problems (no big temporaries)
+        t_out, r_out = _cpa_kernel(traj.pos, traj.t, gap_ok_all, X)
+        return t_out, r_out, t_out + r_out / c_mps
     seg = traj.pos[1:] - traj.pos[:-1]  # (N-1, 3)
     seg2 = np.einsum("ij,ij->i", seg, seg)
     seg2_safe = np.where(seg2 > 0, seg2, 1.0)

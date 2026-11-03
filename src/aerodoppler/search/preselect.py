@@ -200,13 +200,15 @@ def sparse_cpa(
     d_min: float,
     d_max: float,
     counters: list[StageCounter],
+    coarse_dt_s: float = 10.0,
 ) -> SparseCPA:
     t0 = time.perf_counter()
     parts: list[tuple[np.ndarray, ...]] = []
     for si, seg in enumerate(segments):
         traj = seg.traj_build.trajectory
         assert traj is not None
-        te, r, tau = closest_approach_batch(traj, grid.observer_ecef, c_mps)
+        coarse_traj = traj.subsample(coarse_dt_s) if coarse_dt_s > 0 else traj
+        te, r, tau = closest_approach_batch(coarse_traj, grid.observer_ecef, c_mps)
         m = (r >= d_min) & (r <= d_max) & np.isfinite(r)
         if not m.any():
             continue
