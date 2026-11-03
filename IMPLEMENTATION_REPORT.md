@@ -257,3 +257,64 @@ separation 1100 s 37 m (0.42, previously a 15 km false match before slope weight
 straight second flight 7 m (1.44), ADS-B gap 46 m (1.85), 8 distractors 37 m (1.48),
 heading mix 7 m (1.73), RPM drift 35 m (1.07). Errors are bounded by the 25 m final grid plus
 the 200 m coarse phase; `nominal_grid_spacing_m` reports the actual resolution.
+
+### M7 results — semi-synthetic benchmark on REAL trajectories (observed)
+
+`aerodoppler benchmark --real-trajectories adsblol_2026-11-02_1e2f2f08 --observers … --max-assignments 2000000`
+Simulated audio of every real aircraft within 6 km of the observer (random f0 75–135 Hz,
+harmonics, 1/r loss, SNR 10 dB at CPA, 60 Hz hum, gusts) rendered from the **real** ADSB.lol
+tracks via the independent simulator; the search sees the whole real day (≈1,250 airborne
+segments inside the 36×33 km search box) and the real USGS 3DEP DEM. **Still simulated
+acoustics; not a real-recording benchmark.** Cases: three observer sites near Daytona Beach,
+Florida (ormond 29.10/−81.15, deland 29.03/−81.25, daytona_w 29.17/−81.10) × seeds.
+
+| case | audible aircraft (≤6 km) | closest passes | result (top-1) | flights | runtime |
+|---|---|---|---|---|---|
+| ormond_s1 | 5 | 0.5, 1.7, 2.5, 4.3, 4.3 km | **13.3 m** | correct pair | 823 s (60k cap) |
+| deland_s1 | – | – | **16.1 m** | correct pair | 708 s (60k cap) |
+| daytona_w_s1 | 6 (four within 1.1 km in 10 min) | 0.64, 0.68, 0.67, 1.0, 2.3, 5.7 km | **17.8 km (false match, flagged ambiguous, best score 2.95 vs ≥4 in solved cases)** | wrong | 1,235 s (no cap, 626k pairs) |
+| seed-2 cases | see final table below | | | | |
+
+Diagnosis of the daytona failure (kept as a known limitation): with four close flybys inside
+ten minutes the auto-detected second event is a composite ridge (its global plateau ratio
+1.608 is impossible for a 63 m/s aircraft), and the search re-interprets the events as other
+aircraft at a different time of day. The ranked list is correctly flagged `ambiguous` and the
+scores are markedly lower than in solved cases, but the system does not abstain. Mitigations
+implemented along the way (local excursion window, slope weighting, imbalance/coverage
+penalties, all-pairs ultra-coarse screen) fixed the other false matches but not this one.
+Proposed next step: joint multi-event Mode A (use all 3–4 detected events at one shared
+t0 instead of a pair) and operator-guided event selection in the spectrogram lab, which is
+already possible manually.
+
+### Performance (observed on the real-trajectory runs, 6 workers, machine shared)
+
+* segments → trajectories: 1,246 real segments in 12 s; sparse CPA (29k grid × 1,246 tracks,
+  10 s subsampled): 17 s; Mode A pairing (vectorised) 626k pairs in 6 s.
+* ultra-coarse screen: 626k pairs in 836 s (≈8 ms per pair per worker — dominated by per-
+  candidate Python/forward-model overhead, not the numba kernel); coarse: 40k in 297 s; fine:
+  400 in 35 s; refinement: 29 s. Peak RSS 3.4 GB (holds 626k assignment objects + 10 M CPA
+  entries). With the synthetic demo (5 segments) the whole search takes 1.5–2.5 min.
+* Obvious optimisations not done: batch the forward model across candidates sharing a segment,
+  drop per-candidate Python objects in the ultra screen (structured arrays), and prune by the
+  consistency prior only as a tie-breaker.
+
+### Final test summary (observed, final code)
+
+```
+$ AERODOPPLER_OFFLINE=true uv run pytest -q -m "not network" --durations=12
+52 passed, 1 deselected, 1 warning in 771.71s (0:12:51)
+```
+(run concurrently with a 6-worker benchmark; alone the suite takes ~8 min.) Slowest:
+```
+389.12s call     tests/e2e/test_api.py::test_full_flow
+246.22s call     tests/integration/test_search_synthetic.py::test_mode_a_unknown_time_recovers_location_and_clock
+41.87s setup    tests/integration/test_search_synthetic.py::test_auto_events_found
+35.26s call     tests/integration/test_search_synthetic.py::test_mode_b_known_time_single_event
+15.79s setup    tests/e2e/test_api.py::test_health_and_privacy_defaults
+8.56s call     tests/unit/test_ridges.py::test_detector_finds_both_events_and_rejects_hum
+3.06s call     tests/integration/test_search_synthetic.py::test_missing_dem_is_an_explicit_error
+2.56s call     tests/integration/test_adsb_pipeline.py::test_full_local_import_and_query
+```
+Lint: `uv run ruff check src tests` → All checks passed; `ruff format --check` → formatted.
+Network-marked test (3DEP + Copernicus online fetch) passes when run with network access
+(`uv run pytest -m network`); it is deselected offline.
