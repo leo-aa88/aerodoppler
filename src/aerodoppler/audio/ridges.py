@@ -39,8 +39,9 @@ class DetectorConfig:
     max_ridges: int = 12
     smooth_bins: int = 3
     harmonic_tolerance: float = 0.03
-    merge_gap_s: float = 6.0
-    merge_df_bins: float = 6.0
+    merge_gap_s: float = 1.5
+    merge_df_bins: float = 3.0
+    max_bridge_s: float = 1.0  # longer sub-threshold stretches split a tracked path
 
 
 @dataclass(eq=False)
@@ -159,6 +160,31 @@ def detect_ridges(spec: Spectrogram, cfg: DetectorConfig | None = None) -> list[
         if not runs:
             break
         accepted_any = False
+        # split every ON run where the path bridges through sub-threshold values for more than
+        # ``bridge_frames`` consecutive frames (the Viterbi path walking from one aircraft's ridge
+        # to another's through noise)
+        split_runs: list[tuple[int, int]] = []
+        bridge_frames = max(2, int(round(cfg.max_bridge_s / hop)))
+        for a, b in runs:
+            vals_run = W[np.arange(a, b), path[a:b]]
+            weak = vals_run < cfg.threshold_z
+            start = a
+            i = 0
+            while i < b - a:
+                if weak[i]:
+                    j = i
+                    while j < b - a and weak[j]:
+                        j += 1
+                    if j - i > bridge_frames:
+                        if a + i > start:
+                            split_runs.append((start, a + i))
+                        start = a + j
+                    i = j
+                else:
+                    i += 1
+            if b > start:
+                split_runs.append((start, b))
+        runs = split_runs
         for a, b in runs:
             idx = np.arange(a, b)
             bins = path[a:b]
@@ -220,10 +246,17 @@ def _merge_adjacent(
             for b in list(pool):
                 gap = b.times[0] - a.times[-1]
                 if -2 * hop <= gap <= max_gap_s:
-                    fa = a.freqs[-1] + (a.freqs[-1] - a.freqs[max(0, len(a.freqs) - 5)]) * (
-                        max(gap, 0.0) / (hop * 4)
-                    )  # linear continuation
-                    if abs(b.freqs[0] - fa) <= max_df_bins * df:
+                    na = min(len(a.freqs), max(3, int(round(5.0 / hop))))
+                    nb = min(len(b.freqs), max(3, int(round(5.0 / hop))))
+                    slope_a = (a.freqs[-1] - a.freqs[-na]) / max(a.times[-1] - a.times[-na], hop)
+                    slope_b = (b.freqs[nb - 1] - b.freqs[0]) / max(
+                        b.times[nb - 1] - b.times[0], hop
+                    )
+                    fa = a.freqs[-1] + slope_a * max(gap, 0.0)  # linear continuation
+                    slope_ok = abs(slope_b - slope_a) <= max(
+                        0.08, 0.5 * max(abs(slope_a), abs(slope_b))
+                    )
+                    if abs(b.freqs[0] - fa) <= max_df_bins * df and slope_ok:
                         keep = b.times > a.times[-1]
                         if keep.sum() < 2:
                             pool.remove(b)
@@ -250,75 +283,81 @@ def _merge_adjacent(
 
 
 def _group_harmonics(ridges: list[Ridge], tol: float) -> None:
-    """Assign group ids and harmonic numbers using frequency ratios at common times."""
-    n = len(ridges)
+    """Base-anchored harmonic grouping (no transitive unions).
+
+    Ridges are visited by decreasing evidence (mean z × duration). Each ungrouped ridge becomes
+    the base of a new group; another ungrouped ridge joins only if it overlaps the base in time
+    by at least half of the shorter duration and its frequency ratio to the base is a small
+    rational p/q (p, q ≤ 6) within ``tol`` with a stable ratio over the overlap. Harmonic numbers
+    are then assigned with the smallest base-harmonic hypothesis that makes the members integer
+    multiples; members that do not fit are split off into their own group.
+    """
     for r in ridges:
         r.group = -1
         r.harmonic = 1
+    order = sorted(
+        range(len(ridges)), key=lambda i: ridges[i].mean_z * ridges[i].duration_s, reverse=True
+    )
     gid = 0
-    for i in range(n):
-        if ridges[i].group < 0:
-            ridges[i].group = gid
-            gid += 1
-        for j in range(i + 1, n):
-            a, b = ridges[i], ridges[j]
-            t0 = max(a.times[0], b.times[0])
-            t1 = min(a.times[-1], b.times[-1])
-            if t1 - t0 < 20.0:
+    for bi in order:
+        base = ridges[bi]
+        if base.group >= 0:
+            continue
+        base.group = gid
+        members = [base]
+        for j in order:
+            r = ridges[j]
+            if r.group >= 0 or r is base:
                 continue
-            tt = np.arange(t0, t1, 1.0)
-            fa = np.interp(tt, a.times, a.freqs)
-            fb = np.interp(tt, b.times, b.freqs)
-            ratio = fb / fa
+            t0 = max(base.times[0], r.times[0])
+            t1 = min(base.times[-1], r.times[-1])
+            overlap = t1 - t0
+            if overlap < 0.5 * min(base.duration_s, r.duration_s) or overlap < 10.0:
+                continue
+            tt = np.arange(t0, t1, 0.5)
+            ratio = np.interp(tt, r.times, r.freqs) / np.interp(tt, base.times, base.freqs)
             med = float(np.median(ratio))
             spread = float(np.median(np.abs(ratio - med)))
-            best = None
-            for p in range(1, 9):
-                for q in range(1, 9):
-                    if np.gcd(p, q) != 1:
-                        continue
-                    if abs(med - p / q) <= tol * med and spread <= tol * med:
-                        if best is None or p + q < best[0] + best[1]:
-                            best = (p, q)
-            if best is None:
-                continue
-            p, q = best  # fb/fa ≈ p/q  → fa ∝ q, fb ∝ p
-            if b.group < 0:
-                b.group = a.group
-            elif a.group != b.group:
-                # merge groups
-                old = b.group
-                for r in ridges:
-                    if r.group == old:
-                        r.group = a.group
-    # Renumber harmonics per group. Hypothesis h_base (1..4) for the lowest ridge is chosen as
-    # the smallest value for which members covering >= 80 % of the group's total duration have
-    # near-integer implied harmonics; members that do not fit are split into their own group.
-    next_gid = (max(r.group for r in ridges) + 1) if ridges else 0
-    for g in sorted(set(r.group for r in ridges)):
+            ok = False
+            for p_ in range(1, 7):
+                for q_ in range(1, 7):
+                    if (
+                        np.gcd(p_, q_) == 1
+                        and abs(med - p_ / q_) <= tol * med
+                        and spread <= tol * med
+                    ):
+                        ok = True
+                        break
+                if ok:
+                    break
+            if ok:
+                r.group = gid
+                members.append(r)
+        gid += 1
+    # harmonic numbers per group
+    next_gid = gid
+    for g in range(gid):
         members = [r for r in ridges if r.group == g]
         if len(members) == 1:
             members[0].harmonic = 1
             continue
         longest = max(r.duration_s for r in members)
         substantial = [r for r in members if r.duration_s >= 0.3 * longest] or members
-        base = min(substantial, key=lambda r: float(np.median(r.freqs)))
-        base_f = float(np.median(base.freqs))
-        ratios = np.array([_ratio_to(r, base) for r in members])
+        low = min(substantial, key=lambda r: float(np.median(r.freqs)))
+        ratios = np.array([_ratio_to(r, low) for r in members])
         durs = np.array([r.duration_s for r in members])
         chosen = None
         for hb in range(1, 5):
             cand = ratios * hb
             fit = np.abs(cand - np.round(cand)) <= 0.06 * cand
             if durs[fit].sum() >= 0.8 * durs.sum():
-                chosen = (hb, cand, fit)
+                chosen = (cand, fit)
                 break
         if chosen is None:
-            hb = 1
             cand = ratios
             fit = np.abs(cand - np.round(cand)) <= 0.06 * cand
         else:
-            hb, cand, fit = chosen
+            cand, fit = chosen
         for r, c, ok in zip(members, cand, fit, strict=False):
             if ok:
                 r.harmonic = max(1, int(round(c)))
@@ -327,7 +366,6 @@ def _group_harmonics(ridges: list[Ridge], tol: float) -> None:
                 r.group = next_gid
                 r.harmonic = 1
                 next_gid += 1
-        _ = base_f
 
 
 def _ratio_to(r: Ridge, base: Ridge) -> float:

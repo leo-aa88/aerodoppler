@@ -245,8 +245,15 @@ def mode_a_pairs(
     counters: list[StageCounter],
     max_assignments: int,
     warnings: list[str],
+    c_mps: float = 343.0,
 ) -> list[Assignment]:
-    """Two-event pairing: tau_2 - tau_1 = Δt ± tol, with per-event speed/slant bounds."""
+    """Two-event pairing: tau_2 - tau_1 = Δt ± tol, with per-event speed/slant bounds.
+
+    Fully vectorised. If more pairs than ``max_assignments`` exist, the pairs kept are those with
+    the best *physical consistency prior* (slant range implied by each event's Doppler slope and
+    the flight's actual CPA speed vs. the geometric slant range), never simply the first ones in
+    grid order; a warning is recorded.
+    """
     t0 = time.perf_counter()
     if len(sp.tau) == 0:
         counters.append(_counter("mode_a_pairs", 0, 0, t0, "no CPA entries"))
@@ -277,6 +284,7 @@ def mode_a_pairs(
     )
     t1 = time.perf_counter()
     if len(a_idx) == 0 or len(b_idx) == 0:
+        counters.append(_counter("mode_a_pairs", 0, 0, t1, "no entries pass the event bounds"))
         return []
     tbase = float(np.min(sp.tau))
     key_b = sp.point_idx[b_idx].astype(np.float64) * 1e6 + (sp.tau[b_idx] - tbase)
@@ -286,41 +294,55 @@ def mode_a_pairs(
     key_a = sp.point_idx[a_idx].astype(np.float64) * 1e6 + (sp.tau[a_idx] - tbase)
     lo = np.searchsorted(key_b_sorted, key_a + delta_t_s - tol_s, side="left")
     hi = np.searchsorted(key_b_sorted, key_a + delta_t_s + tol_s, side="right")
-    out: list[Assignment] = []
-    n_pairs_total = int(np.sum(hi - lo))
-    for ia, lo_j, hi_j in zip(a_idx, lo, hi, strict=True):
-        for j in range(lo_j, hi_j):
-            ib = b_sorted[j]
-            if sp.seg_idx[ia] == sp.seg_idx[ib]:
-                continue  # same flight cannot be both events
-            seg_a, seg_b = segments[sp.seg_idx[ia]], segments[sp.seg_idx[ib]]
-            prior = 0.5 * (seg_a.class_prior + seg_b.class_prior)
-            out.append(
-                Assignment(
-                    int(sp.point_idx[ia]),
-                    (int(sp.seg_idx[ia]), int(sp.seg_idx[ib])),
-                    (float(sp.tau[ia]), float(sp.tau[ib])),
-                    (float(sp.slant[ia]), float(sp.slant[ib])),
-                    float(sp.tau[ia]) - f1.t_center_s,
-                    prior,
-                )
+    counts = hi - lo
+    n_pairs_total = int(counts.sum())
+    if n_pairs_total == 0:
+        counters.append(
+            _counter(
+                "mode_a_pairs", 0, 0, t1, f"Δt={delta_t_s:.1f}s ± {tol_s:.1f}s: no pair matches"
             )
-            if len(out) >= max_assignments:
-                warnings.append(
-                    f"assignment cap {max_assignments} reached in Mode A pairing; results may be incomplete"
-                )
-                break
-        if len(out) >= max_assignments:
-            break
-    counters.append(
-        _counter(
-            "mode_a_pairs",
-            n_pairs_total,
-            len(out),
-            t1,
-            f"Δt={delta_t_s:.1f}s ± {tol_s:.1f}s; same-flight pairs removed",
         )
+        return []
+    # materialise all (ia, ib) pairs without a Python loop
+    rep_a = np.repeat(np.arange(len(a_idx)), counts)
+    offsets = np.arange(n_pairs_total) - np.repeat(np.cumsum(counts) - counts, counts)
+    ia = a_idx[rep_a]
+    ib = b_sorted[np.repeat(lo, counts) + offsets]
+    same = sp.seg_idx[ia] == sp.seg_idx[ib]
+    ia, ib = ia[~same], ib[~same]
+    n_valid = len(ia)
+    note = f"Δt={delta_t_s:.1f}s ± {tol_s:.1f}s; {int(same.sum())} same-flight pairs removed"
+    if n_valid > max_assignments:
+        # physical consistency prior: |log(r_geom / d_est)| per event, d_est = f_c v^2 / (c |df/dt|)
+        def _prior(idx: np.ndarray, f: EventFeatures) -> np.ndarray:
+            if f.slope_max_hz_per_s <= 1e-4:
+                return np.zeros(len(idx))
+            d_est = f.f_center_hz * sp.speed[idx] ** 2 / (c_mps * f.slope_max_hz_per_s)
+            return np.abs(np.log(np.maximum(sp.slant[idx], 1.0) / np.maximum(d_est, 1.0)))
+
+        cost = _prior(ia, f1) + _prior(ib, f2)
+        keep = np.argpartition(cost, max_assignments - 1)[:max_assignments]
+        ia, ib = ia[keep], ib[keep]
+        warnings.append(
+            f"{n_valid} Mode A pairs exceed the cap {max_assignments}; kept the {max_assignments} with the best slant-distance consistency prior (raise quality_settings.max_assignments or shrink the bbox for completeness)"
+        )
+        note += f"; capped {n_valid} -> {max_assignments} by consistency prior"
+    priors = 0.5 * (
+        np.array([segments[s].class_prior for s in sp.seg_idx[ia]])
+        + np.array([segments[s].class_prior for s in sp.seg_idx[ib]])
     )
+    out = [
+        Assignment(
+            int(sp.point_idx[a]),
+            (int(sp.seg_idx[a]), int(sp.seg_idx[b])),
+            (float(sp.tau[a]), float(sp.tau[b])),
+            (float(sp.slant[a]), float(sp.slant[b])),
+            float(sp.tau[a]) - f1.t_center_s,
+            float(pr),
+        )
+        for a, b, pr in zip(ia, ib, priors, strict=True)
+    ]
+    counters.append(_counter("mode_a_pairs", n_pairs_total, len(out), t1, note))
     return out
 
 

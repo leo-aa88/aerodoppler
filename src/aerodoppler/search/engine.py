@@ -154,7 +154,9 @@ def _score_point(
         traj = ctx.segments[si].traj_build.trajectory
         assert traj is not None
         half = 0.5 * (f.t_end_s - f.t_start_s) + 30.0
-        curves.append(predicted_curve(traj, observer_ecef, ctx.c.c_mps, tau, half, ctx.curve_dt_s))
+        # at most ~600 curve samples per event: long events are sampled more coarsely
+        dt = max(ctx.curve_dt_s, (2.0 * half) / 600.0)
+        curves.append(predicted_curve(traj, observer_ecef, ctx.c.c_mps, tau, half, dt))
         ev = ctx.events[e]
         inputs.append(
             EventInputs(
@@ -381,6 +383,7 @@ class SearchEngine:
                 self.counters,
                 q.max_assignments,
                 self.warnings,
+                c_mps=c.c_mps,
             )
         else:
             assignments = mode_b_matches(

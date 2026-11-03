@@ -246,11 +246,28 @@ def pick_event_pair(
         i = int(np.argmin(slope))
         return float(t[i]) if slope[i] < 0 else 0.5 * (e.audio_start_s + e.audio_end_s)
 
+    def descents(e: DopplerEvent) -> int:
+        """Number of distinct steep-descent episodes (a clean flyby has exactly one)."""
+        t = np.array([p.relative_t_s for p in e.ridge_points])
+        f = np.array([p.frequency_hz for p in e.ridge_points])
+        if len(t) < 20:
+            return 1
+        k = max(3, int(round(10.0 / max(float(np.median(np.diff(t))), 0.05))) | 1)
+        fs = np.convolve(np.pad(f, (k // 2, k // 2), mode="edge"), np.ones(k) / k, mode="valid")
+        slope = np.gradient(fs, t)
+        if np.min(slope) >= 0:
+            return 1
+        steep = slope < 0.3 * float(np.min(slope))
+        edges = np.flatnonzero(np.diff(np.concatenate([[0], steep.astype(int), [0]])))
+        return max(1, len(edges) // 2)
+
     def weight(e: DopplerEvent) -> float:
+        shape = 1.0 / descents(e)  # merged multi-aircraft ridges are penalised
         return (
             (0.2 + e.detection_quality)
             * len(e.candidate_harmonic_numbers)
             * np.sqrt(max(len(e.ridge_points), 1))
+            * shape
         )
 
     ranked = sorted(events, key=weight, reverse=True)
