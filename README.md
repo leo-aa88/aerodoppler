@@ -110,9 +110,13 @@ details and the known degeneracies.
 
 ## Benchmarks (honest summary)
 
-* Synthetic benchmark (12 scenarios) and semi-synthetic benchmark on real ADSB.lol trajectories
-  with simulated audio: results in `IMPLEMENTATION_REPORT.md` §M7 and
-  `data/runs/benchmark_*/…json`. They measure the inverse engine, not real-world accuracy.
+* **Synthetic benchmark** (12 scenarios, simulated audio and flights, limited geometric
+  diversity): Mode A (unknown time) top-1 error median 33 m, p90 45 m, max 53 m, 12/12 correct
+  flight pairs, no false matches; Mode B (known time ±10 s) median 7 m. Measures the inverse
+  engine, not real-world accuracy (`IMPLEMENTATION_REPORT.md` §M7).
+* **Semi-synthetic benchmark** on real ADSB.lol trajectories (central Florida, 2026-11-02,
+  ~1,250 real segments as distractors, real USGS 3DEP terrain, simulated audio): see
+  `IMPLEMENTATION_REPORT.md` §M7 for the per-case table including the failures.
 * Real recordings: **not benchmarked**. `aerodoppler benchmark --manifest cases.json` implements
   the protocol (`docs/validation.md`); it needs 10–20 owner-consented recordings at surveyed
   coordinates. Until then no accuracy figure is claimed and every score is labelled uncalibrated.

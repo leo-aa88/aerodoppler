@@ -231,3 +231,29 @@ provided and follow the tested local install steps, but the container run has **
 verified here. The "clean machine" evidence is instead the GitHub Actions workflow
 (`.github/workflows/ci.yml`: uv sync, lint, fast + slow offline tests, web build) and the
 documented quick start.
+
+### M7 results — synthetic benchmark (final code, observed)
+
+`uv run aerodoppler benchmark --workers 5 --out data/runs/benchmark_synthetic` (12 scenarios;
+`data/runs/benchmark_synthetic/synthetic_benchmark.json`). **SYNTHETIC: simulated audio and
+flights; measures the inverse engine, not real-world accuracy.** All scenarios share the same
+observer and the same two-aircraft layout family (parameters varied: SNR 0/4/8/10 dB at CPA,
+CPA distance 600–4,200 m, speeds 62–110 m/s, separation 300/920/1,100 s, straight vs turning
+second flight, an ADS-B gap, 3–8 distractors, headings, RPM drift), so geometric diversity is
+limited; the semi-synthetic benchmark below uses real tracks.
+
+| metric | Mode A (unknown time, 2 events) | Mode B (known time ±10 s, 2 events) |
+|---|---|---|
+| cases answered / abstained | 12 / 0 | 12 / 0 |
+| top-1 error median / p90 / max | **33.1 m / 45.0 m / 53.0 m** | 7.3 m / 31.2 m / 69.9 m |
+| top-1 within 300 m | 12/12 | 12/12 |
+| false matches (> 1 km) | 0 | 0 |
+| correct flight pair at rank 1 | 12/12 | 12/12 |
+| runtime median / max (5 workers, machine shared with another benchmark) | 162 s / 300 s | 72 s / 141 s |
+
+Per case (Mode A top-1 error, runner-up gap in z): base 31 m (1.18), SNR 4 dB 35 m (1.20),
+SNR 0 dB 7 m (1.21), far CPA 30 m (1.01), near/fast 53 m (0.80), separation 300 s 31 m (1.14),
+separation 1100 s 37 m (0.42, previously a 15 km false match before slope weighting),
+straight second flight 7 m (1.44), ADS-B gap 46 m (1.85), 8 distractors 37 m (1.48),
+heading mix 7 m (1.73), RPM drift 35 m (1.07). Errors are bounded by the 25 m final grid plus
+the 200 m coarse phase; `nominal_grid_spacing_m` reports the actual resolution.
