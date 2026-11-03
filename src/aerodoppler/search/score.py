@@ -156,6 +156,9 @@ class EventScore:
     valid_fraction: float
     drift_penalty: float
     shift_index: int
+    excursion_penalty: float = 0.0
+    coverage_penalty: float = 0.0
+    predicted_excursion: float | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -165,6 +168,9 @@ class EventScore:
             "coverage": self.coverage,
             "valid_fraction": self.valid_fraction,
             "drift_penalty": self.drift_penalty,
+            "excursion_penalty": self.excursion_penalty,
+            "coverage_penalty": self.coverage_penalty,
+            "predicted_excursion": self.predicted_excursion,
         }
 
 
@@ -175,6 +181,10 @@ class ScoreConfig:
     f0_polish_step_fraction: float = 0.0004  # second-pass fine f0 step (0 disables)
     f0_polish_top_shifts: int = 8
     slope_weight_floor: float = 0.3  # weight of plateau samples relative to the steepest sample
+    excursion_penalty_z: float = 6.0  # z per unit |log(R_pred / R_obs)| (velocity plausibility)
+    min_coverage: float = 0.4  # per-event coverage below this is penalised
+    coverage_penalty_z: float = 3.0  # z per unit coverage shortfall
+    imbalance_lambda: float = 0.5  # combined = mean - lambda * (max - min) / 2
     alphas: tuple[float, ...] = (-2e-5, 0.0, 2e-5)
     alpha_penalty_z: float = 0.25  # penalty at |alpha| = max(alphas), quadratic
     harmonics: tuple[int, ...] = (1, 2, 3, 4)
@@ -195,6 +205,7 @@ class EventInputs:
     ridge_t: NDArray[np.float64] | None = None  # observed ridge points (recording-relative s)
     ridge_f: NDArray[np.float64] | None = None  # observed ridge frequencies (Hz)
     ridge_harmonic: int = 1
+    plateau_ratio: float | None = None  # observed f_max/f_min of the ridge (excursion)
 
 
 @dataclass
@@ -324,7 +335,22 @@ def score_event_curve(
                 coverage[si, k, aa] = cov2[0, kk, aa]
                 valid[si, k, aa] = val2[0, kk, aa]
                 ka[si] = (int(k), int(aa))
-    return best, ka, f0s, coverage, valid
+    # predicted frequency excursion over the event window (at the central shift): a far-away
+    # or slow flight predicts a nearly flat curve, which must not be allowed to "fit" a ridge
+    # that visibly sweeps by tens of percent
+    mid = len(shifts) // 2
+    inwin = (t_rel + shifts[mid] >= ev.t_start_s) & (t_rel + shifts[mid] <= ev.t_end_s)
+    if inwin.sum() >= 2:
+        excursion = float(curve.factor[inwin].max() / max(curve.factor[inwin].min(), 1e-9))
+    else:
+        excursion = float("nan")
+    return best, ka, f0s, coverage, valid, excursion
+
+
+def excursion_penalty(pred_ratio: float, obs_ratio: float | None, cfg: ScoreConfig) -> float:
+    if obs_ratio is None or not np.isfinite(pred_ratio) or obs_ratio <= 1.0:
+        return 0.0
+    return float(cfg.excursion_penalty_z * abs(np.log(max(pred_ratio, 1.0) / obs_ratio)))
 
 
 def locked_score(
@@ -340,9 +366,11 @@ def locked_score(
     per_shift: list[NDArray[np.float64]] = []
     details = []
     for curve, ev in zip(curves, events, strict=True):
-        best, ka, f0s, cov, val = score_event_curve(spec, curve, ev, t0_candidates, cfg)
+        best, ka, f0s, cov, val, exc = score_event_curve(spec, curve, ev, t0_candidates, cfg)
+        pen_exc = excursion_penalty(exc, ev.plateau_ratio, cfg)
+        best = best - pen_exc  # applies at every shift (geometry does not depend on t0)
         per_shift.append(best)
-        details.append((ka, f0s, cov, val))
+        details.append((ka, f0s, cov, val, exc, pen_exc))
     weights = np.array([e.weight for e in events], dtype=np.float64)
     combined_by_shift = np.sum(np.stack(per_shift) * weights[:, None], axis=0) / weights.sum()
     if cfg.t0_fit == "joint":
@@ -352,23 +380,32 @@ def locked_score(
     alphas = np.asarray(cfg.alphas)
     amax = np.max(np.abs(alphas)) or 1.0
     per_event = []
-    for (ka, f0s, cov, val), best in zip(details, per_shift, strict=True):
+    for (ka, f0s, cov, val, exc, pen_exc), best in zip(details, per_shift, strict=True):
         k, a = ka[si]
         pen = float(cfg.alpha_penalty_z * (alphas[a] / amax) ** 2)
+        c = float(cov[si, k, a])
+        pen_cov = float(cfg.coverage_penalty_z * max(0.0, cfg.min_coverage - c))
         per_event.append(
             EventScore(
-                float(best[si]),
+                float(best[si]) - pen_cov,
                 float(f0s[si, k]),
                 float(alphas[a]),
-                float(cov[si, k, a]),
+                c,
                 float(val[si, k, a]),
                 pen,
                 si,
+                excursion_penalty=pen_exc,
+                coverage_penalty=pen_cov,
+                predicted_excursion=exc,
             )
         )
+    scores = np.array([e.score for e in per_event])
+    combined = float(np.sum(scores * weights) / weights.sum())
+    if len(scores) > 1:
+        combined -= cfg.imbalance_lambda * 0.5 * float(scores.max() - scores.min())
     return LockedResult(
         float(t0_candidates[si]),
-        float(combined_by_shift[si]),
+        combined,
         per_event,
         combined_by_shift,
         t0_candidates - t0_candidates[0],

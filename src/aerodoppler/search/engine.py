@@ -170,6 +170,7 @@ def _score_point(
                 ridge_t=np.array([p.relative_t_s for p in ev.ridge_points]),
                 ridge_f=np.array([p.frequency_hz for p in ev.ridge_points]),
                 ridge_harmonic=ev.ridge_harmonic,
+                plateau_ratio=f.plateau_ratio,
             )
         )
     t0c = assignment.t0_center if ctx.mode == SearchMode.UNKNOWN_TIME else float(ctx.t0_known)

@@ -85,7 +85,7 @@ def silence_penalty(
             harmonics=cfg.harmonics[:3],
             harmonic_weights=cfg.harmonic_weights[:3],
         )
-        best, _, _, _, _ = score_event_curve(spec, curve, ev, np.array([t0_abs]), coarse)
+        best, _, _, _, _, _ = score_event_curve(spec, curve, ev, np.array([t0_abs]), coarse)
         evidence = float(best[0])
         pen = penalty_per_flight_z * aud if evidence < evidence_threshold_z else 0.0
         total += pen
