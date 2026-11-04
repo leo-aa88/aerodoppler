@@ -337,7 +337,7 @@ terrain. Runtime ≈ 13 s per case (4 workers).
 | answered — correct aircraft at rank 1 | 83 % (15/18) |
 | all 29 incl. abstained candidates — top-1 median / within 500 m / > 1 km | 466 m / 55 % / 38 % |
 | all 29 — correct aircraft at rank 1 | 83 % (24/29) |
-| confidence grades (answered, final 9-gate version) | high 5 (median 315 m, 40 % ≤ 300 m, 20 % > 1 km, max 3.4 km), medium 1 (3.1 km), low 12 (median 364 m, 42 % > 1 km) |
+| confidence grades (answered, 9-gate version of 2026-11-03; superseded by the 10-gate re-run below) | high 5 (median 315 m, 40 % ≤ 300 m, 20 % > 1 km, max 3.4 km), medium 1 (3.1 km), low 12 (median 364 m, 42 % > 1 km) |
 | gates failing among the 18 answered | margin_distinct_location 12, radius 9, margin (different flights) 4, core_matches 1, track_support 1 |
 
 Reading: a single straight pass with a ±2 s clock pins the aircraft well (83 % right) but
@@ -346,8 +346,10 @@ top-3" (179 m) is much better than top-1 (391 m) and why most errors > 1 km are 
 solution. The grades only partly separate good from bad answers on single-pass real
 recordings: before the distinct-location margin gate the "high" group contained 7 cases with
 29 % beyond 1 km; with it (final version) "high" contains 5 cases with 20 % beyond 1 km and the
-mirror cases mostly drop to low — but one 3.4 km mirror solution is still graded high, so
-"high" must not be read as "within a few hundred metres" on one-pass recordings. The three
+mirror cases mostly drop to low — but one 3.4 km answer (a wrong aircraft fitted to a
+plateau-less fragment, not a mirror) was still graded high; the 2026-11-04 reliability pass
+below traces that to a silent null fallback and removes it. "High" must still not be read as
+"within a few hundred metres" on one-pass recordings. The three
 self-distrust gates added after DOPPLERGEIST (track support, search completeness, sensitivity)
 all passed on these cases and therefore did not change their grades. The abstention threshold (`min_score_z` = 1.2, tuned on synthetic audio) is
 conservative for noisy phone audio: 5 of the 11 abstained cases had a top-1 within 300 m.
@@ -388,6 +390,61 @@ from the ~100 m aspiration; they are reproducible from `docs/livermore_benchmark
 | N621KS_R18 | V_constant_H_varying | 3031 | auto | abstained | 2484 | 343 | True |
 | N4040_R12 | V_constant_H_constant | 1024 | published ridge fallback | abstained | 145 | 145 | True |
 
+
+### Reliability pass 2026-11-04 — gates, not accuracy (observed)
+
+Motivation: the roadmap for v0.2 is reliability (know when the answer is untrustworthy) before
+new features. Diagnosing the one Livermore answer graded *high* at 3.4 km (N748SP_R36, wrong
+aircraft) showed a bug rather than a tuning problem: the chance-match null drew random clock
+offsets of 60–900 s, but the clip is 68 s long, so every null sample fell outside the recording,
+the null array was empty and the gate silently compared the score with a placeholder `0.00±1.00`
+("2.9σ", passed). A second case (N563FX_R21) had the same placeholder. On most other short
+clips the "null" was the score of a curve lying entirely outside the recording (≈ 0 with a tiny
+spread, hence the 20–50σ figures in the old details), which is not a chance match either.
+
+Changes (gates only; no search, scoring or detection change):
+
+1. **In-recording chance-match null.** Offsets are drawn within ± the recording length and kept
+   only if every event's window stays ≥ 40 % inside the recording while shifted by at least
+   max(20 s, half its duration); the sample count and the |offset| band are reported. With
+   fewer than 8 valid samples the gate fails with "null NOT estimable (clip too short)" instead
+   of passing on a made-up null (`engine._null_offsets`, `rank.gate_results(null_n=…)`).
+2. **`event_shape` gate** (high only): an event flagged `plateaus_not_reached`,
+   `no_descending_slope` or `non_monotonic_ridge` cannot support a high grade — the fragment
+   leaves speed and slant range underdetermined, which is exactly how a C172 at 450 m slant
+   out-scored the true C172 at 1.36 km in N748SP_R36. The flag already existed as a warning.
+3. **`alternatives`** in `SearchResult` and on the Results screen: distinct locations ≥ 1 km from
+   the top-1 whose score is within 0.5 z of it, with gap and flights, so a thin win is shown
+   as "one of these" rather than a single spot.
+
+Livermore re-run (`docs/livermore_benchmark_2026-11-04.json`, same protocol, same 29 cases;
+locations, errors and abstentions are byte-identical to 2026-11-03 since only gates changed):
+
+| | 2026-11-03 | 2026-11-04 |
+|---|---|---|
+| high: n / median / max / > 1 km / correct aircraft | 5 / 315 m / 3389 m / 1 / 4 of 5 | **3 / 315 m / 466 m / 0 / 3 of 3** |
+| medium | 1 (3.1 km) | 3 (85 m, 3.1 km, 3.4 km) |
+| low | 12 (median 364 m) | 12 (median 364 m) |
+| null not estimable | — (silent placeholder in 2 cases) | 1 case (N563FX_R21, already low), failed visibly |
+| cases listing ≥ 1 alternative | — | 13 of 18 (all low/medium; the 3 high have none) |
+
+Per-case changes: N748SP_R36 high → medium (event_shape; its null is now 0.69±0.24 from 48
+offsets of 33–48 s), N7RR_R30 high → medium (event_shape; a correct 85 m answer, the price of
+the rule), everything else unchanged. Caveats, stated plainly: both rules were chosen while
+looking at these 18 answered cases, so the table is not a blind test of them; and on 60–180 s
+clips the valid offsets form a narrow band, so the reported σ values (5–76) are a threshold
+test, not a significance level — the band is now printed next to them. The gate thresholds
+themselves are unchanged. Synthetic benchmark re-run with the new gates: see below (pending
+at the time of writing; the first cases reproduce the documented errors exactly).
+
+Dense-traffic reproducibility note: re-running the documented `ormond_s1` oracle-events case
+(same seed, same scenario, same chosen pair) gave 16.7 km instead of 25 m. The documented win
+was a near-tie (true pair 4.176 vs a circuit-flying trainer pair 4.168, 0.008 z); this time
+the same two hypotheses scored 4.272 vs 4.320 and the order flipped (fine/refinement scores
+vary at the 0.1 z level between runs with different worker counts). The new output says so:
+grade low, five alternatives listed with the true pair 0.05 z behind. The 2026-11-03 "oracle
+2/6" therefore reads as "1 clear + 1 coin-flip"; the widened dense-traffic benchmark below
+replaces that table.
 
 ### Final test summary (observed, final code)
 
@@ -442,8 +499,10 @@ passed when run with network access (`uv run pytest -m network` → 1 passed, 22
 9. The UI has no authentication and must stay on localhost; SSE progress is a 1 s poll.
 10. The confidence grade is a rule-based verdict whose thresholds (2σ, ±4 s, 0.5 z, 1 km,
     ±150 m / ±5 m/s) were set by judgement on synthetic data and the Livermore set, not
-    calibrated against outcomes; on the Livermore single-pass clips "high" still contains a
-    3.4 km mirror solution (5 cases: 40 % within 300 m, 20 % beyond 1 km).
+    calibrated against outcomes. After the 2026-11-04 reliability pass "high" on the Livermore
+    single-pass clips is 3 cases, all the right aircraft, worst 466 m — but 18 answered cases
+    cannot calibrate anything, and the two new rules were chosen with these cases in view. A
+    blind multi-pass real set (roadmap M8) is the only way to test them honestly.
 
 ## Next executable actions
 

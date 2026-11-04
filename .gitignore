@@ -26,3 +26,4 @@ web/next-env.d.ts
 .env
 # scratch
 *.log
+web/tsconfig.tsbuildinfo

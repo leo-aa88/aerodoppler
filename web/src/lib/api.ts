@@ -128,6 +128,16 @@ export interface CandidatesResponse {
   synthetic: boolean;
   confidence_grade?: string;
   gates?: Gate[];
+  alternatives?: Alternative[];
+}
+
+export interface Alternative {
+  lat: number;
+  lon: number;
+  score_total: number;
+  gap_z: number;
+  distance_from_top1_m: number;
+  icao24: string[];
 }
 
 export interface CurveEvent {

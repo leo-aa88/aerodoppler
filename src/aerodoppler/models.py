@@ -332,3 +332,6 @@ class SearchResult(BaseModel):
     manifest: dict[str, Any] = Field(default_factory=dict)
     confidence_grade: str = "low"  # high / medium / low — a graded verdict, not a probability
     gates: list[Gate] = Field(default_factory=list)
+    # distinct locations (>= 1 km from the top-1) whose score is within the high-grade margin
+    # of the winner: the answer is "one of these", not the top-1 alone
+    alternatives: list[dict[str, Any]] = Field(default_factory=list)

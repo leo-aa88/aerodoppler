@@ -81,6 +81,9 @@ def gate_results(
     unheard_close_pass_penalty: float | None,
     landscape_radius_m: float | None,
     margin_distinct_location_z: float | None = None,
+    null_n: list[int] | None = None,
+    null_offset_range_s: tuple[float, float] | None = None,
+    event_flags: list[list[str]] | None = None,
     track_support: tuple[bool, str] | None = None,
     completeness: tuple[bool, str] | None = None,
     sensitivity: tuple[bool, str] | None = None,
@@ -89,6 +92,7 @@ def gate_results(
     margin_high_z: float = 0.5,
     margin_medium_z: float = 0.25,
     radius_max_m: float = 1000.0,
+    min_null_samples: int = 8,
 ) -> tuple[str, list[dict]]:
     """Graded confidence after fdop's five gates, in this code's units (whitened z):
 
@@ -98,6 +102,7 @@ def gate_results(
     clock offset is within clock_tol_s of the shared clock; margin — the winner beats the best
     rival that uses different flights by margin_high_z (or no rival); no unheard close pass —
     no penalised unheard aircraft; radius — landscape radius <= radius_max_m.
+    event shape — every event reaches its plateaus with a clear descent (high only).
     High = all gates; medium = core + clock + margin >= margin_medium_z; else low.
     """
     gates: list[dict] = []
@@ -105,12 +110,29 @@ def gate_results(
     ok_events = []
     details = []
     for i, (sc, cov) in enumerate(zip(per_event_scores, per_event_coverage, strict=True)):
+        n_null = null_n[i] if null_n is not None else None
+        if n_null is not None and n_null < min_null_samples:
+            # no usable null: the recording is too short for enough shifted alignments of this
+            # event's window; fail visibly instead of comparing with a made-up null
+            ok_events.append(False)
+            details.append(
+                f"event {i + 1}: score {sc:.2f}, chance-match null NOT estimable ({n_null} valid "
+                f"random-clock samples inside the recording, need {min_null_samples}; clip too "
+                f"short for this event), coverage {cov:.0%}"
+            )
+            continue
         mu, sd = null_mean[i], max(null_std[i], 1e-6)
         sig = (sc - mu) / sd
         ok = sig >= 2.0 and cov >= min_coverage
         ok_events.append(ok)
+        n_txt = f", n={n_null}" if n_null is not None else ""
+        if null_offset_range_s is not None:
+            # short clips only allow a narrow band of offsets, so the null spread (and this σ)
+            # says little beyond "above chance"; show the band so the figure is not over-read
+            lo, hi = null_offset_range_s
+            n_txt += f", |offsets| {lo:.0f}–{hi:.0f} s"
         details.append(
-            f"event {i + 1}: score {sc:.2f} vs chance {mu:.2f}±{sd:.2f} ({sig:.1f}σ), coverage {cov:.0%}"
+            f"event {i + 1}: score {sc:.2f} vs chance {mu:.2f}±{sd:.2f} ({sig:.1f}σ{n_txt}), coverage {cov:.0%}"
         )
     core = sum(ok_events) >= need and len(ok_events) >= need
     gates.append(
@@ -194,6 +216,29 @@ def gate_results(
         else:
             gates.append({"name": name, "passed": bool(item[0]), "detail": item[1]})
             extras_ok = extras_ok and bool(item[0])
+    # event shape: a ridge that never reaches its plateaus (or has no clear descent) leaves the
+    # pass speed and slant range underdetermined, so a different aircraft at a different slant
+    # can fit the same fragment; such evidence cannot support a high grade
+    bad_shape = {"plateaus_not_reached", "no_descending_slope", "non_monotonic_ridge"}
+    if event_flags is None:
+        gates.append({"name": "event_shape", "passed": True, "detail": "not evaluated"})
+    else:
+        problems = [
+            f"event {i + 1}: {', '.join(sorted(set(fl) & bad_shape))}"
+            for i, fl in enumerate(event_flags)
+            if set(fl) & bad_shape
+        ]
+        shape_ok = not problems
+        gates.append(
+            {
+                "name": "event_shape",
+                "passed": shape_ok,
+                "detail": "every event reaches both Doppler plateaus with a clear descent"
+                if shape_ok
+                else "; ".join(problems) + " (speed/slant underdetermined; not high)",
+            }
+        )
+        extras_ok = extras_ok and shape_ok
     track_ok = track_support is None or bool(track_support[0])
     if core and clock and margin_ok and unheard_ok and radius_ok and extras_ok:
         grade = "high"

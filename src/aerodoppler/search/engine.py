@@ -1036,23 +1036,32 @@ class SearchEngine:
                 )
             else:
                 own_offsets.append(None)
-        # chance-match null: the same curves at random clock offsets far from the fitted clock
-        rng = np.random.default_rng(seed)
-        offsets = rng.uniform(-900.0, 900.0, 48)
-        offsets = offsets[np.abs(offsets) > 60.0]
-        null = _score_point(
-            ctx,
-            winner.assignment,
-            winner.observer_ecef,
-            coarse=False,
-            taus=winner.assignment.tau,
-            t0_override=full.t0_abs + offsets,
-        )
-        null_mean, null_std = [], []
-        for arr in null.per_event_shift_scores:
-            a = arr[np.isfinite(arr) & (arr > -5)]
-            null_mean.append(float(a.mean()) if a.size else 0.0)
-            null_std.append(float(a.std()) if a.size > 1 else 1.0)
+        # chance-match null: the same curves at random clock offsets that are far from the
+        # fitted clock but still keep every event's window inside the recording. An offset that
+        # pushes a curve out of the recording scores an empty window (~0), which is not a
+        # chance match; short clips used to get exactly that (or no sample at all) and the gate
+        # then compared the score with a meaningless null. Now the sample count is reported
+        # and the gate fails visibly when too few valid offsets exist.
+        offsets = self._null_offsets(ctx, seed)
+        null_mean, null_std, null_n = [], [], []
+        if offsets.size:
+            null = _score_point(
+                ctx,
+                winner.assignment,
+                winner.observer_ecef,
+                coarse=False,
+                taus=winner.assignment.tau,
+                t0_override=full.t0_abs + offsets,
+            )
+            for arr in null.per_event_shift_scores:
+                a = arr[np.isfinite(arr) & (arr > -5)]
+                null_n.append(int(a.size))
+                null_mean.append(float(a.mean()) if a.size else 0.0)
+                null_std.append(float(a.std()) if a.size > 1 else 1.0)
+        else:
+            null_n = [0] * len(full.per_event)
+            null_mean = [0.0] * len(full.per_event)
+            null_std = [1.0] * len(full.per_event)
         # rival with different flights
         wset = set(winner.assignment.seg_idx)
         riv = [r.total for r in rivals if set(r.assignment.seg_idx) != wset]
@@ -1061,6 +1070,9 @@ class SearchEngine:
             r.total for r in rivals if haversine_m(r.lat, r.lon, winner.lat, winner.lon) >= 1000.0
         ]
         margin_loc = (winner.total - max(far)) if far else None
+        # distinct alternative locations (>= 1 km away) that the winner does not clearly beat:
+        # reported alongside the grade so a thin win is shown as "one of these", not as one spot
+        self._alternatives = self._distinct_alternatives(ctx, winner, rivals)
         track = self._track_support(ctx, winner)
         complete = self._completeness_gate()
         sens_ok, sens_detail, sens_rows = self._sensitivity(ctx, winner, self._quality)
@@ -1075,12 +1087,83 @@ class SearchEngine:
             per_event_coverage=[e.coverage for e in full.per_event],
             null_mean=null_mean,
             null_std=null_std,
+            null_n=null_n,
+            null_offset_range_s=(float(np.abs(offsets).min()), float(np.abs(offsets).max()))
+            if offsets.size
+            else None,
+            event_flags=[list(f.flags) for f in ctx.feats],
             own_clock_offsets_s=own_offsets,
             margin_distinct_flights_z=margin,
             margin_distinct_location_z=margin_loc,
             unheard_close_pass_penalty=winner.silence_pen if ctx.silence else None,
             landscape_radius_m=landscape_radius_m,
         )
+
+    @staticmethod
+    def _null_offsets(
+        ctx: EngineContext,
+        seed: int,
+        n_wanted: int = 48,
+        min_coverage: float = 0.4,
+        min_offset_s: float = 20.0,
+    ) -> np.ndarray:
+        """Random clock offsets for the chance-match null that keep every event's window at
+        least ``min_coverage`` inside the recording while shifting it by at least half its own
+        duration (and ``min_offset_s``), so the curve is tested at a genuinely different
+        alignment of the same recording. Returns an empty array when the clip is too short."""
+        t_lo, t_hi = float(ctx.spec.times[0]), float(ctx.spec.times[-1])
+        windows = [(float(f.t_start_s), float(f.t_end_s)) for f in ctx.feats]
+        rng = np.random.default_rng(seed)
+        span = t_hi - t_lo
+        draws = rng.uniform(-span, span, 40 * n_wanted)
+        keep: list[float] = []
+        for off in draws:
+            ok = True
+            for a, b in windows:
+                dur = max(b - a, 1e-6)
+                if abs(off) < max(min_offset_s, 0.5 * dur):
+                    ok = False
+                    break
+                # shifting the clock by +off moves the curve to recording-relative [a-off, b-off]
+                inside = min(b - off, t_hi) - max(a - off, t_lo)
+                if inside < min_coverage * dur:
+                    ok = False
+                    break
+            if ok:
+                keep.append(float(off))
+                if len(keep) >= n_wanted:
+                    break
+        return np.array(keep, dtype=float)
+
+    def _distinct_alternatives(
+        self,
+        ctx: EngineContext,
+        winner: ScoredAssignment,
+        rivals: list[ScoredAssignment],
+        margin_z: float = 0.5,
+        min_distance_m: float = 1000.0,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for r in sorted(rivals, key=lambda r: -r.total):
+            d = haversine_m(r.lat, r.lon, winner.lat, winner.lon)
+            if d < min_distance_m or r.total < winner.total - margin_z:
+                continue
+            if any(haversine_m(r.lat, r.lon, o["lat"], o["lon"]) < min_distance_m for o in out):
+                continue
+            out.append(
+                {
+                    "lat": float(r.lat),
+                    "lon": float(r.lon),
+                    "score_total": round(float(r.total), 4),
+                    "gap_z": round(float(winner.total - r.total), 4),
+                    "distance_from_top1_m": round(float(d)),
+                    "icao24": sorted({ctx.segments[i].icao24 for i in r.assignment.seg_idx}),
+                }
+            )
+            if len(out) >= limit:
+                break
+        return out
 
     @staticmethod
     def _as_point(sa: ScoredAssignment) -> ScoredPoint:
@@ -1237,6 +1320,7 @@ class SearchEngine:
             manifest=manifest,
             confidence_grade=grade,
             gates=[Gate(**g) for g in gates],
+            alternatives=getattr(self, "_alternatives", []),
         )
         self._export(
             out_dir,

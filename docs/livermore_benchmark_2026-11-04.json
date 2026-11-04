@@ -1,0 +1,1303 @@
+{
+  "label": "REAL RECORDINGS (Pathak Livermore set, CC BY 4.0) \u2014 truth = trilaterated recorder (not surveyed); audio start derived from the published ridge; events detected blind; known-time mode \u00b12 s; 4 km box offset from the recorder",
+  "zenodo": "23424278",
+  "aerodoppler_version": "0.1.0",
+  "git_sha": "644c16bf7f5ceb7d4579ad365cfc07d631d1f0cb",
+  "trilateration": {
+    "lat": 37.663202075359926,
+    "lon": -121.78186821134538,
+    "east_m": -1047.163522914938,
+    "north_m": -1864.3398980659642,
+    "n_tracks": 37,
+    "rms_m": 0.057515236452573316,
+    "median_abs_m": 0.02329885711787938,
+    "residuals_m": {
+      "N86LP_R01": -0.008056335393462177,
+      "N9393T_R02": -0.03372178792437808,
+      "N788BM_R03": 0.02141601437722329,
+      "N784MB_R04": -0.011090258541685216,
+      "N413AK_R05": -0.02911050915344049,
+      "N373DF_R06": 0.07663808861130406,
+      "N814SR_R07": 0.04171174178634374,
+      "N60RS_R11": 0.005883655142497446,
+      "N4040_R12": -0.027394015749678147,
+      "N795MM_R13": -0.0016844149486132665,
+      "N248LF_R14": 0.16509377774991663,
+      "N913TC_R15": 0.009920236306243169,
+      "N413AK_R16": -0.020053872488347224,
+      "N500MG_R17": 0.01318086338925184,
+      "N621KS_R18": -0.02420232000008582,
+      "N4004R_R19": -0.019624536077117227,
+      "N394FX_R20": -0.005821978956703333,
+      "N563FX_R21": -0.024447735738476695,
+      "N916KT_R22": 0.026328687903969694,
+      "N310MG_R23": 0.02329885711787938,
+      "N9658K_R24": 0.025634453570773985,
+      "N8085W_R27": -0.030518911349989963,
+      "N7RR_R30": 0.056338036921715684,
+      "N172EL_R35": 0.020883686809042956,
+      "N748SP_R36": -0.02066494357177362,
+      "N61NG_R37": -0.011603978572793494,
+      "N456CS_R38": 0.06858190120556173,
+      "N3012N_R40": 0.0918342359802864,
+      "N757AH_R41": -0.015405901180656656,
+      "N759NC_R46": 0.03129828949772673,
+      "N662EZ_R48": 0.01882585369548906,
+      "N413AK_R49": 0.21851672585489723,
+      "N958JX_R50": 0.07217335548585879,
+      "N451EE_R51": 0.015028624396734358,
+      "N231DT_R57": 0.07953920913132606,
+      "N67WL_R59": 0.010461290218700015,
+      "N7PG_R60": -0.02249559520441835
+    },
+    "outliers_m": {
+      "N2933A_R08": 3364.9518250772567,
+      "N1387U_R44": 1494.4214239204953,
+      "N451EE_R45": 4727.407242271992
+    },
+    "method": "robust least squares on |dist(recorder, ground track) - L_ADSB_m|; second pass without passages with |residual| >= 150 m (recorded elsewhere)"
+  },
+  "datasets": [
+    "adsblol_2026-05-17_c432e6e8",
+    "adsblol_2026-05-16_c432e6e8"
+  ],
+  "summary": {
+    "n_cases": 29,
+    "n_answered": 18,
+    "n_abstained": 11,
+    "abstention_rate": 0.3793103448275862,
+    "abstention_reasons": {
+      "weak_fit": 11
+    },
+    "top1_error_m": {
+      "median": 390.5155191645914,
+      "p90": 4392.4036865679045,
+      "max": 6746.081289221,
+      "values": [
+        1500.3,
+        3126.5,
+        153.3,
+        84.6,
+        6733.2,
+        465.6,
+        81.5,
+        6746.1,
+        167.5,
+        2121.2,
+        1060.8,
+        67.4,
+        3389.2,
+        115.3,
+        499.2,
+        229.2,
+        181.5,
+        315.4
+      ]
+    },
+    "top3_min_error_m": {
+      "median": 178.72556683941463,
+      "p90": 2186.8383470329404
+    },
+    "success_rate_top1_within_300m": 0.4444444444444444,
+    "success_rate_top3_within_300m": 0.6666666666666666,
+    "false_match_rate_top1_over_1km": 0.3888888888888889,
+    "flights_correct_rate": 0.8333333333333334,
+    "runtime_s": {
+      "median": 15.805028200149536,
+      "max": 24.07327890396118
+    },
+    "calibration_note": "scores are relative, uncalibrated fit values; no confidence intervals are claimed"
+  },
+  "cases": [
+    {
+      "case": "N451EE_R45",
+      "skipped": "trilateration outlier (4727 m): recorded at another place"
+    },
+    {
+      "case": "N1387U_R44",
+      "skipped": "trilateration outlier (1494 m): recorded at another place"
+    },
+    {
+      "case": "N2933A_R08",
+      "skipped": "trilateration outlier (3365 m): recorded at another place"
+    },
+    {
+      "case": "N757AH_R41",
+      "skipped": "no ADS-B dataset imported for 2026-05-12"
+    },
+    {
+      "case": "N814SR_R07",
+      "skipped": "no ADS-B dataset imported for 2026-05-12"
+    },
+    {
+      "case": "N373DF_R06",
+      "skipped": "no ADS-B dataset imported for 2026-05-13"
+    },
+    {
+      "case": "N451EE_R51",
+      "skipped": "no ADS-B dataset imported for 2026-05-13"
+    },
+    {
+      "case": "N662EZ_R48",
+      "skipped": "no ADS-B dataset imported for 2026-05-13"
+    },
+    {
+      "case": "N759NC_R46",
+      "skipped": "no ADS-B dataset imported for 2026-05-14"
+    },
+    {
+      "case": "N784MB_R04",
+      "skipped": "no ADS-B dataset imported for 2026-05-14"
+    },
+    {
+      "case": "N9658K_R24",
+      "skipped": "no ADS-B dataset imported for 2026-05-14"
+    },
+    {
+      "case": "N3012N_R40",
+      "category": "V_varying_H_varying",
+      "day": "2026-05-16",
+      "tail": "N3012N",
+      "L_m": 1983.913102,
+      "R_min_m": 2157.9328791714274,
+      "trilateration_residual_m": 0.0918342359802864,
+      "case_id": "N3012N_R40",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 1500.3404163800203,
+      "topk_min_error_m": 1347.2533035624122,
+      "top1_flights_correct": false,
+      "top1_score": 1.4437179323591776,
+      "runner_up_gap_z": 0.0004985510198747267,
+      "runtime_s": 12.619744300842285,
+      "n_candidates": 5,
+      "notes": {
+        "run_id": "run_26ed40e64746",
+        "top1_flights": [
+          "a4f9f8"
+        ],
+        "truth_icao24": "a325b4",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1778949498.0813334,
+          "t0_utc": "2026-05-16T16:38:18.081333Z",
+          "ridge_mean_z": 1.8595686000052785,
+          "n_candidates": 40,
+          "n_within_half_z": 9,
+          "ridge_t_first_rel_s": 5.249666690826416,
+          "ridge_t_last_rel_s": 75.0956666469574
+        },
+        "abstention": null,
+        "n_candidates": 5
+      }
+    },
+    {
+      "case": "N310MG_R23",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-16",
+      "tail": "N310MG",
+      "L_m": 1476.282876,
+      "R_min_m": 1684.9160271408678,
+      "trilateration_residual_m": 0.02329885711787938,
+      "case_id": "N310MG_R23",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 3126.543155239948,
+      "topk_min_error_m": 47.39467397477374,
+      "top1_flights_correct": true,
+      "top1_score": 1.6455461322509612,
+      "runner_up_gap_z": 0.1359861506622917,
+      "runtime_s": 11.623857736587524,
+      "n_candidates": 4,
+      "notes": {
+        "run_id": "run_5775ca02009c",
+        "top1_flights": [
+          "a347eb"
+        ],
+        "truth_icao24": "a347eb",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1778951052.6198125,
+          "t0_utc": "2026-05-16T17:04:12.619812Z",
+          "ridge_mean_z": 1.524051724763713,
+          "n_candidates": 41,
+          "n_within_half_z": 10,
+          "ridge_t_first_rel_s": 4.750187397003174,
+          "ridge_t_last_rel_s": 55.64818739891052
+        },
+        "abstention": null,
+        "n_candidates": 4
+      }
+    },
+    {
+      "case": "N916KT_R22",
+      "category": "V_constant_H_constant",
+      "day": "2026-05-16",
+      "tail": "N916KT",
+      "L_m": 534.88127,
+      "R_min_m": 1047.7307667945754,
+      "trilateration_residual_m": 0.026328687903969694,
+      "case_id": "N916KT_R22",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 153.25677042437457,
+      "topk_min_error_m": 153.25677042437457,
+      "top1_flights_correct": true,
+      "top1_score": 2.5688844441543464,
+      "runner_up_gap_z": 0.02659160737874977,
+      "runtime_s": 13.240340948104858,
+      "n_candidates": 5,
+      "notes": {
+        "run_id": "run_8bc3b9293a7c",
+        "top1_flights": [
+          "acade8"
+        ],
+        "truth_icao24": "acade8",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1778951582.9002085,
+          "t0_utc": "2026-05-16T17:13:02.900208Z",
+          "ridge_mean_z": 1.0787391571331346,
+          "n_candidates": 40,
+          "n_within_half_z": 7,
+          "ridge_t_first_rel_s": 4.999791622161865,
+          "ridge_t_last_rel_s": 72.43079161643982
+        },
+        "abstention": null,
+        "n_candidates": 5
+      }
+    },
+    {
+      "case": "N7RR_R30",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-16",
+      "tail": "N7RR",
+      "L_m": 2162.113636,
+      "R_min_m": 3046.5285859529563,
+      "trilateration_residual_m": 0.056338036921715684,
+      "case_id": "N7RR_R30",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 84.62748086725396,
+      "topk_min_error_m": 84.62748086725396,
+      "top1_flights_correct": true,
+      "top1_score": 2.9408598668856403,
+      "runner_up_gap_z": 0.48468016372081557,
+      "runtime_s": 19.814906358718872,
+      "n_candidates": 3,
+      "notes": {
+        "run_id": "run_be7995de1494",
+        "top1_flights": [
+          "a95163"
+        ],
+        "truth_icao24": "a95163",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1778951986.9270625,
+          "t0_utc": "2026-05-16T17:19:46.927063Z",
+          "ridge_mean_z": 3.212906959448517,
+          "n_candidates": 40,
+          "n_within_half_z": 7,
+          "ridge_t_first_rel_s": 4.999937534332275,
+          "ridge_t_last_rel_s": 104.00993752479553
+        },
+        "abstention": null,
+        "n_candidates": 3
+      }
+    },
+    {
+      "case": "N563FX_R21",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-16",
+      "tail": "N563FX",
+      "L_m": 617.654597,
+      "R_min_m": 2100.234069967647,
+      "trilateration_residual_m": -0.024447735738476695,
+      "case_id": "N563FX_R21",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 6733.211092849428,
+      "topk_min_error_m": 5732.646057434952,
+      "top1_flights_correct": false,
+      "top1_score": 1.9326244098518406,
+      "runner_up_gap_z": 0.6317978641590125,
+      "runtime_s": 9.426931858062744,
+      "n_candidates": 5,
+      "notes": {
+        "run_id": "run_18d5cb0c810d",
+        "top1_flights": [
+          "a70825"
+        ],
+        "truth_icao24": "a732a2",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1778955836.08975,
+          "t0_utc": "2026-05-16T18:23:56.089750Z",
+          "ridge_mean_z": 1.2493077410361335,
+          "n_candidates": 41,
+          "n_within_half_z": 12,
+          "ridge_t_first_rel_s": 5.250249862670898,
+          "ridge_t_last_rel_s": 124.87925004959106
+        },
+        "abstention": null,
+        "n_candidates": 5
+      }
+    },
+    {
+      "case": "N958JX_R50",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-16",
+      "tail": "N958JX",
+      "L_m": 50.264303,
+      "R_min_m": 5067.9054898572695,
+      "trilateration_residual_m": 0.07217335548585879,
+      "case_id": "N958JX_R50",
+      "abstained": true,
+      "abstention_reason": "weak_fit",
+      "top1_error_m": 4567.236232021714,
+      "topk_min_error_m": 3816.7694480288365,
+      "top1_flights_correct": false,
+      "top1_score": -0.49722641534697193,
+      "runner_up_gap_z": 0.07205320340064952,
+      "runtime_s": 8.959721565246582,
+      "n_candidates": 5,
+      "notes": {
+        "run_id": "run_711c6f4e4a66",
+        "top1_flights": [
+          "a287a0"
+        ],
+        "truth_icao24": "ad533d",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1778956279.74825,
+          "t0_utc": "2026-05-16T18:31:19.748250Z",
+          "ridge_mean_z": 0.554043161847557,
+          "n_candidates": 40,
+          "n_within_half_z": 10,
+          "ridge_t_first_rel_s": 4.9997498989105225,
+          "ridge_t_last_rel_s": 42.33774995803833
+        },
+        "abstention": {
+          "abstained": true,
+          "reason": "weak_fit",
+          "detail": "best relative fit score -0.50 < 1.2 (no convincing ridge energy along any predicted curve)"
+        },
+        "n_candidates": 5
+      }
+    },
+    {
+      "case": "N8085W_R27",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-16",
+      "tail": "N8085W",
+      "L_m": 18.935605,
+      "R_min_m": 1489.9951804345667,
+      "trilateration_residual_m": -0.030518911349989963,
+      "case_id": "N8085W_R27",
+      "abstained": true,
+      "abstention_reason": "weak_fit",
+      "top1_error_m": 63.761948233457765,
+      "topk_min_error_m": 63.761948233457765,
+      "top1_flights_correct": true,
+      "top1_score": 0.8601711611661783,
+      "runner_up_gap_z": 0.1133665725398737,
+      "runtime_s": 10.246109962463379,
+      "n_candidates": 4,
+      "notes": {
+        "run_id": "run_d88d7c459219",
+        "top1_flights": [
+          "ab02b1"
+        ],
+        "truth_icao24": "ab02b1",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1778957381.6749167,
+          "t0_utc": "2026-05-16T18:49:41.674917Z",
+          "ridge_mean_z": 1.4863473527113218,
+          "n_candidates": 41,
+          "n_within_half_z": 7,
+          "ridge_t_first_rel_s": 5.0000832080841064,
+          "ridge_t_last_rel_s": 69.08708333969116
+        },
+        "abstention": {
+          "abstained": true,
+          "reason": "weak_fit",
+          "detail": "best relative fit score 0.86 < 1.2 (no convincing ridge energy along any predicted curve)"
+        },
+        "n_candidates": 4
+      }
+    },
+    {
+      "case": "N394FX_R20",
+      "category": "V_constant_H_constant",
+      "day": "2026-05-16",
+      "tail": "N394FX",
+      "L_m": 388.91114,
+      "R_min_m": 1758.3057505424113,
+      "trilateration_residual_m": -0.005821978956703333,
+      "case_id": "N394FX_R20",
+      "abstained": true,
+      "abstention_reason": "weak_fit",
+      "top1_error_m": 545.1952695874903,
+      "topk_min_error_m": 464.79789423650783,
+      "top1_flights_correct": true,
+      "top1_score": -0.9421507476519738,
+      "runner_up_gap_z": 0.00048204239788929293,
+      "runtime_s": 8.744672775268555,
+      "n_candidates": 4,
+      "notes": {
+        "run_id": "run_b3a0f4fba3c3",
+        "top1_flights": [
+          "a49238"
+        ],
+        "truth_icao24": "a49238",
+        "event_source": "published ridge (fallback, harmonic assumed 1)",
+        "audio_start": {
+          "t0_unix": 1778962344.4293334,
+          "t0_utc": "2026-05-16T20:12:24.429333Z",
+          "ridge_mean_z": 1.2332909930140732,
+          "n_candidates": 40,
+          "n_within_half_z": 9,
+          "ridge_t_first_rel_s": 4.999666452407837,
+          "ridge_t_last_rel_s": 55.52666664123535
+        },
+        "abstention": {
+          "abstained": true,
+          "reason": "weak_fit",
+          "detail": "best relative fit score -0.94 < 1.2 (no convincing ridge energy along any predicted curve)"
+        },
+        "n_candidates": 4
+      }
+    },
+    {
+      "case": "N413AK_R05",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-16",
+      "tail": "N413AK",
+      "L_m": 304.409764,
+      "R_min_m": 1332.4846832477099,
+      "trilateration_residual_m": -0.02911050915344049,
+      "case_id": "N413AK_R05",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 465.60827921299335,
+      "topk_min_error_m": 175.9902257501755,
+      "top1_flights_correct": true,
+      "top1_score": 3.9307497329478185,
+      "runner_up_gap_z": 0.008096034099196903,
+      "runtime_s": 22.49442458152771,
+      "n_candidates": 5,
+      "notes": {
+        "run_id": "run_87ede8042166",
+        "top1_flights": [
+          "a4df4f"
+        ],
+        "truth_icao24": "a4df4f",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1778964654.1085207,
+          "t0_utc": "2026-05-16T20:50:54.108521Z",
+          "ridge_mean_z": 3.371686559207247,
+          "n_candidates": 40,
+          "n_within_half_z": 9,
+          "ridge_t_first_rel_s": 4.999479293823242,
+          "ridge_t_last_rel_s": 138.375479221344
+        },
+        "abstention": null,
+        "n_candidates": 5
+      }
+    },
+    {
+      "case": "N413AK_R49",
+      "category": "V_constant_H_constant",
+      "day": "2026-05-16",
+      "tail": "N413AK",
+      "L_m": 3732.148642,
+      "R_min_m": 3935.821618038208,
+      "trilateration_residual_m": 0.21851672585489723,
+      "case_id": "N413AK_R49",
+      "abstained": true,
+      "abstention_reason": "weak_fit",
+      "top1_error_m": 5625.983123584965,
+      "topk_min_error_m": 1880.9133877480567,
+      "top1_flights_correct": false,
+      "top1_score": 0.6495269526943246,
+      "runner_up_gap_z": 0.2085269383214916,
+      "runtime_s": 12.098451614379883,
+      "n_candidates": 5,
+      "notes": {
+        "run_id": "run_14988005e906",
+        "top1_flights": [
+          "a14c3e"
+        ],
+        "truth_icao24": "a4df4f",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1778967472.562646,
+          "t0_utc": "2026-05-16T21:37:52.562646Z",
+          "ridge_mean_z": 1.2701286044279774,
+          "n_candidates": 40,
+          "n_within_half_z": 11,
+          "ridge_t_first_rel_s": 4.999354124069214,
+          "ridge_t_last_rel_s": 88.2203540802002
+        },
+        "abstention": {
+          "abstained": true,
+          "reason": "weak_fit",
+          "detail": "best relative fit score 0.65 < 1.2 (no convincing ridge energy along any predicted curve)"
+        },
+        "n_candidates": 5
+      }
+    },
+    {
+      "case": "N4004R_R19",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-16",
+      "tail": "N4004R",
+      "L_m": 770.887901,
+      "R_min_m": 1427.3845223653218,
+      "trilateration_residual_m": -0.019624536077117227,
+      "case_id": "N4004R_R19",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 81.54311665161818,
+      "topk_min_error_m": 81.54311665161818,
+      "top1_flights_correct": true,
+      "top1_score": 1.3174601133644277,
+      "runner_up_gap_z": 0.23799165527568134,
+      "runtime_s": 23.35075807571411,
+      "n_candidates": 5,
+      "notes": {
+        "run_id": "run_00a06338ad58",
+        "top1_flights": [
+          "a4af95"
+        ],
+        "truth_icao24": "a4af95",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1778975759.0314584,
+          "t0_utc": "2026-05-16T23:55:59.031458Z",
+          "ridge_mean_z": 2.566584836709727,
+          "n_candidates": 40,
+          "n_within_half_z": 7,
+          "ridge_t_first_rel_s": 4.999541521072388,
+          "ridge_t_last_rel_s": 96.57954168319702
+        },
+        "abstention": null,
+        "n_candidates": 5
+      }
+    },
+    {
+      "case": "N248LF_R14",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-17",
+      "tail": "N248LF",
+      "L_m": 3202.633886,
+      "R_min_m": 3607.370744364354,
+      "trilateration_residual_m": 0.16509377774991663,
+      "case_id": "N248LF_R14",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 6746.081289221,
+      "topk_min_error_m": 297.3075809586204,
+      "top1_flights_correct": true,
+      "top1_score": 1.5765967300922652,
+      "runner_up_gap_z": 0.03703018841664729,
+      "runtime_s": 20.486949682235718,
+      "n_candidates": 4,
+      "notes": {
+        "run_id": "run_b62bd21df1bc",
+        "top1_flights": [
+          "a24eb7"
+        ],
+        "truth_icao24": "a24eb7",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779036654.7076042,
+          "t0_utc": "2026-05-17T16:50:54.707604Z",
+          "ridge_mean_z": 2.0995804734739374,
+          "n_candidates": 40,
+          "n_within_half_z": 11,
+          "ridge_t_first_rel_s": 4.999395847320557,
+          "ridge_t_last_rel_s": 146.92039585113525
+        },
+        "abstention": null,
+        "n_candidates": 4
+      }
+    },
+    {
+      "case": "N67WL_R59",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-17",
+      "tail": "N67WL",
+      "L_m": 242.250848,
+      "R_min_m": 3948.473765856895,
+      "trilateration_residual_m": 0.010461290218700015,
+      "case_id": "N67WL_R59",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 167.48971023197123,
+      "topk_min_error_m": 167.48971023197123,
+      "top1_flights_correct": true,
+      "top1_score": 2.0521825445333888,
+      "runner_up_gap_z": 0.26474294206119264,
+      "runtime_s": 24.07327890396118,
+      "n_candidates": 3,
+      "notes": {
+        "run_id": "run_bbe92fbf6029",
+        "top1_flights": [
+          "a8db5e"
+        ],
+        "truth_icao24": "a8db5e",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779037307.9178126,
+          "t0_utc": "2026-05-17T17:01:47.917813Z",
+          "ridge_mean_z": 2.074691555654563,
+          "n_candidates": 261,
+          "n_within_half_z": 7,
+          "ridge_t_first_rel_s": 4.920187473297119,
+          "ridge_t_last_rel_s": 121.20618748664856
+        },
+        "abstention": null,
+        "n_candidates": 3
+      }
+    },
+    {
+      "case": "N7PG_R60",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-17",
+      "tail": "N7PG",
+      "L_m": 4373.963727,
+      "R_min_m": 4759.356053956658,
+      "trilateration_residual_m": -0.02249559520441835,
+      "case_id": "N7PG_R60",
+      "abstained": true,
+      "abstention_reason": "weak_fit",
+      "top1_error_m": 529.6441423288752,
+      "topk_min_error_m": 400.7970487868081,
+      "top1_flights_correct": true,
+      "top1_score": -1.2511806053640413,
+      "runner_up_gap_z": 0.06867223079370999,
+      "runtime_s": 10.56673264503479,
+      "n_candidates": 4,
+      "notes": {
+        "run_id": "run_7d03d91daaa1",
+        "top1_flights": [
+          "a95128"
+        ],
+        "truth_icao24": "a95128",
+        "event_source": "published ridge (fallback, harmonic assumed 1)",
+        "audio_start": {
+          "t0_unix": 1779038964.8136249,
+          "t0_utc": "2026-05-17T17:29:24.813625Z",
+          "ridge_mean_z": 0.6662059962393695,
+          "n_candidates": 41,
+          "n_within_half_z": 12,
+          "ridge_t_first_rel_s": 5.000375032424927,
+          "ridge_t_last_rel_s": 107.5393750667572
+        },
+        "abstention": {
+          "abstained": true,
+          "reason": "weak_fit",
+          "detail": "best relative fit score -1.25 < 1.2 (no convincing ridge energy along any predicted curve)"
+        },
+        "n_candidates": 4
+      }
+    },
+    {
+      "case": "N231DT_R57",
+      "category": "V_varying_H_varying",
+      "day": "2026-05-17",
+      "tail": "N231DT",
+      "L_m": 2323.221794,
+      "R_min_m": 2483.7588235894973,
+      "trilateration_residual_m": 0.07953920913132606,
+      "case_id": "N231DT_R57",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 2121.19878068126,
+      "topk_min_error_m": 1671.5402761410926,
+      "top1_flights_correct": true,
+      "top1_score": 1.427094254479209,
+      "runner_up_gap_z": 0.08015192297019258,
+      "runtime_s": 18.604797840118408,
+      "n_candidates": 5,
+      "notes": {
+        "run_id": "run_0133ed23e519",
+        "top1_flights": [
+          "a20c94"
+        ],
+        "truth_icao24": "a20c94",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779039599.8615625,
+          "t0_utc": "2026-05-17T17:39:59.861562Z",
+          "ridge_mean_z": 1.6153611326076796,
+          "n_candidates": 41,
+          "n_within_half_z": 12,
+          "ridge_t_first_rel_s": 5.250437498092651,
+          "ridge_t_last_rel_s": 75.28143739700317
+        },
+        "abstention": null,
+        "n_candidates": 5
+      }
+    },
+    {
+      "case": "N172EL_R35",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-17",
+      "tail": "N172EL",
+      "L_m": 692.659075,
+      "R_min_m": 1373.3444604109059,
+      "trilateration_residual_m": 0.020883686809042956,
+      "case_id": "N172EL_R35",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 1060.7860104223105,
+      "topk_min_error_m": 162.89554674281808,
+      "top1_flights_correct": true,
+      "top1_score": 1.9277746801286717,
+      "runner_up_gap_z": 0.07415116022616774,
+      "runtime_s": 16.376546621322632,
+      "n_candidates": 4,
+      "notes": {
+        "run_id": "run_1fe18fc924c6",
+        "top1_flights": [
+          "a1210a"
+        ],
+        "truth_icao24": "a1210a",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779042476.949396,
+          "t0_utc": "2026-05-17T18:27:56.949396Z",
+          "ridge_mean_z": 0.9735004149923018,
+          "n_candidates": 41,
+          "n_within_half_z": 12,
+          "ridge_t_first_rel_s": 5.000604152679443,
+          "ridge_t_last_rel_s": 127.41560411453247
+        },
+        "abstention": null,
+        "n_candidates": 4
+      }
+    },
+    {
+      "case": "N913TC_R15",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-17",
+      "tail": "N913TC",
+      "L_m": 1705.117085,
+      "R_min_m": 1980.5040551361042,
+      "trilateration_residual_m": 0.009920236306243169,
+      "case_id": "N913TC_R15",
+      "abstained": true,
+      "abstention_reason": "weak_fit",
+      "top1_error_m": 49.945217106378315,
+      "topk_min_error_m": 49.945217106378315,
+      "top1_flights_correct": true,
+      "top1_score": 0.9751033560826174,
+      "runner_up_gap_z": 0.26090870473974925,
+      "runtime_s": 12.629429817199707,
+      "n_candidates": 3,
+      "notes": {
+        "run_id": "run_af29536a1d25",
+        "top1_flights": [
+          "aca37c"
+        ],
+        "truth_icao24": "aca37c",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779042697.8183541,
+          "t0_utc": "2026-05-17T18:31:37.818354Z",
+          "ridge_mean_z": 1.0335285397194418,
+          "n_candidates": 40,
+          "n_within_half_z": 9,
+          "ridge_t_first_rel_s": 4.999645948410034,
+          "ridge_t_last_rel_s": 93.42164587974548
+        },
+        "abstention": {
+          "abstained": true,
+          "reason": "weak_fit",
+          "detail": "best relative fit score 0.98 < 1.2 (no convincing ridge energy along any predicted curve)"
+        },
+        "n_candidates": 3
+      }
+    },
+    {
+      "case": "N788BM_R03",
+      "category": "V_constant_H_constant",
+      "day": "2026-05-17",
+      "tail": "N788BM",
+      "L_m": 858.430129,
+      "R_min_m": 1261.8677854999723,
+      "trilateration_residual_m": 0.02141601437722329,
+      "case_id": "N788BM_R03",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 67.39841720011651,
+      "topk_min_error_m": 67.39841720011651,
+      "top1_flights_correct": true,
+      "top1_score": 1.344854713902782,
+      "runner_up_gap_z": 0.05694527308265118,
+      "runtime_s": 17.886738300323486,
+      "n_candidates": 3,
+      "notes": {
+        "run_id": "run_b28067cf3aca",
+        "top1_flights": [
+          "aaae63"
+        ],
+        "truth_icao24": "aaae63",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779046184.1383333,
+          "t0_utc": "2026-05-17T19:29:44.138333Z",
+          "ridge_mean_z": 1.4101045818697617,
+          "n_candidates": 41,
+          "n_within_half_z": 8,
+          "ridge_t_first_rel_s": 5.000666618347168,
+          "ridge_t_last_rel_s": 63.02666664123535
+        },
+        "abstention": null,
+        "n_candidates": 3
+      }
+    },
+    {
+      "case": "N748SP_R36",
+      "category": "V_varying_H_constant",
+      "day": "2026-05-17",
+      "tail": "N748SP",
+      "L_m": 664.649356,
+      "R_min_m": 1357.4514118970924,
+      "trilateration_residual_m": -0.02066494357177362,
+      "case_id": "N748SP_R36",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 3389.2005124472485,
+      "topk_min_error_m": 3389.2005124472485,
+      "top1_flights_correct": false,
+      "top1_score": 2.88310229794419,
+      "runner_up_gap_z": 0.06474686886264402,
+      "runtime_s": 15.805028200149536,
+      "n_candidates": 5,
+      "notes": {
+        "run_id": "run_fd8df299c75e",
+        "top1_flights": [
+          "a41852"
+        ],
+        "truth_icao24": "aa11e0",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779048403.6909792,
+          "t0_utc": "2026-05-17T20:06:43.690979Z",
+          "ridge_mean_z": 2.231432822111489,
+          "n_candidates": 41,
+          "n_within_half_z": 7,
+          "ridge_t_first_rel_s": 5.000020742416382,
+          "ridge_t_last_rel_s": 63.36802077293396
+        },
+        "abstention": null,
+        "n_candidates": 5
+      }
+    },
+    {
+      "case": "N60RS_R11",
+      "category": "V_varying_H_constant",
+      "day": "2026-05-17",
+      "tail": "N60RS",
+      "L_m": 2468.734479,
+      "R_min_m": 2816.990603052451,
+      "trilateration_residual_m": 0.005883655142497446,
+      "case_id": "N60RS_R11",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 115.31697582230188,
+      "topk_min_error_m": 115.31697582230188,
+      "top1_flights_correct": true,
+      "top1_score": 2.522217001028576,
+      "runner_up_gap_z": 0.04816727727142123,
+      "runtime_s": 22.109577894210815,
+      "n_candidates": 4,
+      "notes": {
+        "run_id": "run_85fd96d7087f",
+        "top1_flights": [
+          "a7c66e"
+        ],
+        "truth_icao24": "a7c66e",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779050773.8663332,
+          "t0_utc": "2026-05-17T20:46:13.866333Z",
+          "ridge_mean_z": 1.488774008953948,
+          "n_candidates": 41,
+          "n_within_half_z": 10,
+          "ridge_t_first_rel_s": 5.000666856765747,
+          "ridge_t_last_rel_s": 87.09066677093506
+        },
+        "abstention": null,
+        "n_candidates": 4
+      }
+    },
+    {
+      "case": "N61NG_R37",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-17",
+      "tail": "N61NG",
+      "L_m": 1426.381926,
+      "R_min_m": 2785.7119415059688,
+      "trilateration_residual_m": -0.011603978572793494,
+      "case_id": "N61NG_R37",
+      "abstained": true,
+      "abstention_reason": "weak_fit",
+      "top1_error_m": 283.8862559987884,
+      "topk_min_error_m": 134.1572509590215,
+      "top1_flights_correct": true,
+      "top1_score": 0.6217520519185891,
+      "runner_up_gap_z": 0.03124734599861978,
+      "runtime_s": 9.37603497505188,
+      "n_candidates": 3,
+      "notes": {
+        "run_id": "run_e84ebec73872",
+        "top1_flights": [
+          "a7ed98"
+        ],
+        "truth_icao24": "a7ed98",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779051458.069625,
+          "t0_utc": "2026-05-17T20:57:38.069625Z",
+          "ridge_mean_z": 1.5384671298917765,
+          "n_candidates": 40,
+          "n_within_half_z": 8,
+          "ridge_t_first_rel_s": 4.999375104904175,
+          "ridge_t_last_rel_s": 72.92537498474121
+        },
+        "abstention": {
+          "abstained": true,
+          "reason": "weak_fit",
+          "detail": "best relative fit score 0.62 < 1.2 (no convincing ridge energy along any predicted curve)"
+        },
+        "n_candidates": 3
+      }
+    },
+    {
+      "case": "N500MG_R17",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-17",
+      "tail": "N500MG",
+      "L_m": 36.050822,
+      "R_min_m": 5687.48438944078,
+      "trilateration_residual_m": 0.01318086338925184,
+      "case_id": "N500MG_R17",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 499.2156376926685,
+      "topk_min_error_m": 499.2156376926685,
+      "top1_flights_correct": true,
+      "top1_score": 1.7923716136985597,
+      "runner_up_gap_z": 0.007758979948586875,
+      "runtime_s": 17.82437515258789,
+      "n_candidates": 4,
+      "notes": {
+        "run_id": "run_51f555f62e37",
+        "top1_flights": [
+          "a63b0a"
+        ],
+        "truth_icao24": "a63b0a",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779051685.2269583,
+          "t0_utc": "2026-05-17T21:01:25.226958Z",
+          "ridge_mean_z": 2.5639982549985065,
+          "n_candidates": 41,
+          "n_within_half_z": 6,
+          "ridge_t_first_rel_s": 5.000041723251343,
+          "ridge_t_last_rel_s": 69.00004172325134
+        },
+        "abstention": null,
+        "n_candidates": 4
+      }
+    },
+    {
+      "case": "N795MM_R13",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-17",
+      "tail": "N795MM",
+      "L_m": 559.079537,
+      "R_min_m": 4929.652375051938,
+      "trilateration_residual_m": -0.0016844149486132665,
+      "case_id": "N795MM_R13",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 229.23007062638368,
+      "topk_min_error_m": 229.23007062638368,
+      "top1_flights_correct": true,
+      "top1_score": 1.8335173407113068,
+      "runner_up_gap_z": 0.002831956215932019,
+      "runtime_s": 22.816211462020874,
+      "n_candidates": 4,
+      "notes": {
+        "run_id": "run_4f35f0225d1f",
+        "top1_flights": [
+          "aacbb7"
+        ],
+        "truth_icao24": "aacbb7",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779054276.1536667,
+          "t0_utc": "2026-05-17T21:44:36.153667Z",
+          "ridge_mean_z": 2.872857823006176,
+          "n_candidates": 41,
+          "n_within_half_z": 8,
+          "ridge_t_first_rel_s": 4.750333309173584,
+          "ridge_t_last_rel_s": 72.67533326148987
+        },
+        "abstention": null,
+        "n_candidates": 4
+      }
+    },
+    {
+      "case": "N413AK_R16",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-17",
+      "tail": "N413AK",
+      "L_m": 767.11691,
+      "R_min_m": 1628.0139965155008,
+      "trilateration_residual_m": -0.020053872488347224,
+      "case_id": "N413AK_R16",
+      "abstained": true,
+      "abstention_reason": "weak_fit",
+      "top1_error_m": 1459.030094044841,
+      "topk_min_error_m": 242.98102105364612,
+      "top1_flights_correct": true,
+      "top1_score": -2.4034176609937594,
+      "runner_up_gap_z": 0.07935465824944599,
+      "runtime_s": 18.404581308364868,
+      "n_candidates": 4,
+      "notes": {
+        "run_id": "run_8b78ba613c1c",
+        "top1_flights": [
+          "a4df4f"
+        ],
+        "truth_icao24": "a4df4f",
+        "event_source": "published ridge (fallback, harmonic assumed 1)",
+        "audio_start": {
+          "t0_unix": 1779054393.493625,
+          "t0_utc": "2026-05-17T21:46:33.493625Z",
+          "ridge_mean_z": 2.1087618319291024,
+          "n_candidates": 40,
+          "n_within_half_z": 9,
+          "ridge_t_first_rel_s": 4.999375104904175,
+          "ridge_t_last_rel_s": 142.04537510871887
+        },
+        "abstention": {
+          "abstained": true,
+          "reason": "weak_fit",
+          "detail": "best relative fit score -2.40 < 1.2 (no convincing ridge energy along any predicted curve)"
+        },
+        "n_candidates": 4
+      }
+    },
+    {
+      "case": "N456CS_R38",
+      "category": "V_varying_H_constant",
+      "day": "2026-05-17",
+      "tail": "N456CS",
+      "L_m": 2092.671768,
+      "R_min_m": 2511.004005206017,
+      "trilateration_residual_m": 0.06858190120556173,
+      "case_id": "N456CS_R38",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 181.46090792865374,
+      "topk_min_error_m": 181.46090792865374,
+      "top1_flights_correct": true,
+      "top1_score": 1.6415269189824564,
+      "runner_up_gap_z": 0.22550741456113,
+      "runtime_s": 18.285443782806396,
+      "n_candidates": 3,
+      "notes": {
+        "run_id": "run_329d3e1ff097",
+        "top1_flights": [
+          "a588a9"
+        ],
+        "truth_icao24": "a588a9",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779054847.9783332,
+          "t0_utc": "2026-05-17T21:54:07.978333Z",
+          "ridge_mean_z": 1.3477512494335553,
+          "n_candidates": 41,
+          "n_within_half_z": 10,
+          "ridge_t_first_rel_s": 5.000666856765747,
+          "ridge_t_last_rel_s": 114.22666668891907
+        },
+        "abstention": null,
+        "n_candidates": 3
+      }
+    },
+    {
+      "case": "N9393T_R02",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-17",
+      "tail": "N9393T",
+      "L_m": 1331.544776,
+      "R_min_m": 3005.5751889173193,
+      "trilateration_residual_m": -0.03372178792437808,
+      "case_id": "N9393T_R02",
+      "abstained": true,
+      "abstention_reason": "weak_fit",
+      "top1_error_m": 92.08798561864873,
+      "topk_min_error_m": 92.08798561864873,
+      "top1_flights_correct": true,
+      "top1_score": 1.076992016902068,
+      "runner_up_gap_z": 0.009461552064604195,
+      "runtime_s": 13.54653024673462,
+      "n_candidates": 4,
+      "notes": {
+        "run_id": "run_dd7f4b379d2a",
+        "top1_flights": [
+          "ad09eb"
+        ],
+        "truth_icao24": "ad09eb",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779055382.336,
+          "t0_utc": "2026-05-17T22:03:02.336000Z",
+          "ridge_mean_z": 0.9656247366238435,
+          "n_candidates": 40,
+          "n_within_half_z": 11,
+          "ridge_t_first_rel_s": 5.0,
+          "ridge_t_last_rel_s": 132.48799991607666
+        },
+        "abstention": {
+          "abstained": true,
+          "reason": "weak_fit",
+          "detail": "best relative fit score 1.08 < 1.2 (no convincing ridge energy along any predicted curve)"
+        },
+        "n_candidates": 4
+      }
+    },
+    {
+      "case": "N86LP_R01",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-17",
+      "tail": "N86LP",
+      "L_m": 444.652185,
+      "R_min_m": 1594.6312003275075,
+      "trilateration_residual_m": -0.008056335393462177,
+      "case_id": "N86LP_R01",
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 315.4227591161894,
+      "topk_min_error_m": 315.4227591161894,
+      "top1_flights_correct": true,
+      "top1_score": 1.5247958926194507,
+      "runner_up_gap_z": 0.02126456138320898,
+      "runtime_s": 22.80550765991211,
+      "n_candidates": 4,
+      "notes": {
+        "run_id": "run_406d3cc973da",
+        "top1_flights": [
+          "abcd86"
+        ],
+        "truth_icao24": "abcd86",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779056409.585979,
+          "t0_utc": "2026-05-17T22:20:09.585979Z",
+          "ridge_mean_z": 2.0543633733741,
+          "n_candidates": 53,
+          "n_within_half_z": 8,
+          "ridge_t_first_rel_s": 4.993021011352539,
+          "ridge_t_last_rel_s": 106.1980209350586
+        },
+        "abstention": null,
+        "n_candidates": 4
+      }
+    },
+    {
+      "case": "N621KS_R18",
+      "category": "V_constant_H_varying",
+      "day": "2026-05-17",
+      "tail": "N621KS",
+      "L_m": 1210.141314,
+      "R_min_m": 3031.1548780272556,
+      "trilateration_residual_m": -0.02420232000008582,
+      "case_id": "N621KS_R18",
+      "abstained": true,
+      "abstention_reason": "weak_fit",
+      "top1_error_m": 2484.44098425644,
+      "topk_min_error_m": 342.9342035966472,
+      "top1_flights_correct": true,
+      "top1_score": 0.5161347576150699,
+      "runner_up_gap_z": 0.05802930823044994,
+      "runtime_s": 8.347391366958618,
+      "n_candidates": 5,
+      "notes": {
+        "run_id": "run_e65628d5337e",
+        "top1_flights": [
+          "a81ae6"
+        ],
+        "truth_icao24": "a81ae6",
+        "event_source": "auto",
+        "audio_start": {
+          "t0_unix": 1779060101.5676668,
+          "t0_utc": "2026-05-17T23:21:41.567667Z",
+          "ridge_mean_z": 1.1406419096985436,
+          "n_candidates": 41,
+          "n_within_half_z": 9,
+          "ridge_t_first_rel_s": 5.000333309173584,
+          "ridge_t_last_rel_s": 59.613333225250244
+        },
+        "abstention": {
+          "abstained": true,
+          "reason": "weak_fit",
+          "detail": "best relative fit score 0.52 < 1.2 (no convincing ridge energy along any predicted curve)"
+        },
+        "n_candidates": 5
+      }
+    },
+    {
+      "case": "N4040_R12",
+      "category": "V_constant_H_constant",
+      "day": "2026-05-17",
+      "tail": "N4040",
+      "L_m": 586.600859,
+      "R_min_m": 1023.5290685319842,
+      "trilateration_residual_m": -0.027394015749678147,
+      "case_id": "N4040_R12",
+      "abstained": true,
+      "abstention_reason": "weak_fit",
+      "top1_error_m": 145.49470425504794,
+      "topk_min_error_m": 145.49470425504794,
+      "top1_flights_correct": true,
+      "top1_score": -0.7843816584914046,
+      "runner_up_gap_z": 0.09582888660825994,
+      "runtime_s": 6.898901700973511,
+      "n_candidates": 5,
+      "notes": {
+        "run_id": "run_b24de223aba7",
+        "top1_flights": [
+          "a4bdd5"
+        ],
+        "truth_icao24": "a4bdd5",
+        "event_source": "published ridge (fallback, harmonic assumed 1)",
+        "audio_start": {
+          "t0_unix": 1779060461.7659585,
+          "t0_utc": "2026-05-17T23:27:41.765959Z",
+          "ridge_mean_z": 0.9752781381157589,
+          "n_candidates": 41,
+          "n_within_half_z": 13,
+          "ridge_t_first_rel_s": 5.250041484832764,
+          "ridge_t_last_rel_s": 87.17004156112671
+        },
+        "abstention": {
+          "abstained": true,
+          "reason": "weak_fit",
+          "detail": "best relative fit score -0.78 < 1.2 (no convincing ridge energy along any predicted curve)"
+        },
+        "n_candidates": 5
+      }
+    }
+  ]
+}

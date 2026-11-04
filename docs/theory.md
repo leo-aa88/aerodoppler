@@ -145,10 +145,14 @@ single 1,285 s "mega-event" into the two genuine flybys plus the plateau remnant
 
 ## Confidence gates (graded verdict, not a probability)
 
-After fdop (franken_doppler_finder), every answer carries a grade computed from five gates in
-this code's units: **core matches** (each event's score beats a chance-match null — the same
-predicted curves scored at 48 random clock offsets in the same recording — by ≥ 2σ, with
-coverage ≥ 40 %; two events in unknown-time mode, one in known-time mode), **clock lock** (every
+After fdop (franken_doppler_finder), every answer carries a grade computed from gates in this
+code's units: **core matches** (each event's score beats a chance-match null — the same
+predicted curves scored at up to 48 random clock offsets of the same recording — by ≥ 2σ, with
+coverage ≥ 40 %; two events in unknown-time mode, one in known-time mode. Only offsets that keep
+the event's window at least 40 % inside the recording while shifting it by at least half its
+duration count as null samples; when fewer than 8 such offsets exist, typically on clips under
+a minute or two, the null is *not estimable* and the gate fails visibly rather than comparing
+with a made-up null), **clock lock** (every
 event's own best clock offset within ±4 s of the shared clock), **margin** (winner beats the best
 rival that uses different flights by ≥ 0.5 z; ≥ 0.25 z for medium), **no unheard close pass**
 (no penalised unheard aircraft; Mode A only) and **radius** (score-landscape radius ≤ 1 km).
@@ -157,6 +161,15 @@ physically support the fitted CPA: inside the sampled interval, no gap or glitch
 **search_complete** (retention accounting: nothing comparable to the winner was discarded at a
 cap), **sensitivity_stable** (the answer survives speed-of-sound ±5 m/s and height-bias
 ±150 m re-refinement without moving more than max(300 m, 4 cells) or losing more than 1 z).
-High needs all eight, medium needs core + clock + the medium margin + track_support,
+A **margin_distinct_location** gate compares the winner with the best hypothesis ≥ 1 km away
+whatever its flights (a mirror solution of a single straight pass uses the *same* flight, so it
+escapes the different-flight margin), and an **event_shape** gate refuses a high grade when any
+event's ridge never reaches both Doppler plateaus or has no clear descent: such a fragment
+leaves the pass speed and slant range underdetermined, so a different aircraft at a different
+slant can fit it just as well (this is exactly how the one confidently wrong Livermore answer
+arose). High needs all gates, medium needs core + clock + the medium margins + track_support,
 everything else is low.
 The gates and their details are in `result.json`, the CLI summary and the Results screen.
+Alongside the grade, `alternatives` lists the distinct locations (≥ 1 km from the top-1) whose
+score lies within 0.5 z of the winner; when it is non-empty the honest reading of the result is
+"one of these places", and the Results screen says so.

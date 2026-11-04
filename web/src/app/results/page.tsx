@@ -108,7 +108,18 @@ function Results() {
       {res?.warnings?.length ? <div className="banner warn">{res.warnings.join(" · ")}</div> : null}
       {res && res.candidates.length > 0 && (
         <div className={`banner ${res.confidence_grade === "high" ? "ok" : res.confidence_grade === "medium" ? "warn" : "danger"}`}>
-          <b>Confidence grade: {(res.confidence_grade ?? "low").toUpperCase()}</b> (graded verdict from five gates, not a probability)
+          <b>Confidence grade: {(res.confidence_grade ?? "low").toUpperCase()}</b> (graded verdict from the gates below, not a probability)
+          {res.alternatives?.length ? (
+            <div style={{ margin: "6px 0 0 0" }}>
+              <b>Ambiguous:</b> the top-1 does not clearly beat {res.alternatives.length} other location{res.alternatives.length > 1 ? "s" : ""} (within 0.5 z, ≥ 1 km apart). Read the answer as one of:{" "}
+              {res.alternatives.map((a, i) => (
+                <span key={i}>
+                  {i > 0 ? "; " : ""}
+                  <code>{a.lat.toFixed(5)}, {a.lon.toFixed(5)}</code> ({(a.distance_from_top1_m / 1000).toFixed(1)} km away, −{a.gap_z.toFixed(2)} z, {a.icao24.join("+")})
+                </span>
+              ))}
+            </div>
+          ) : null}
           <ul className="small" style={{ margin: "6px 0 0 16px" }}>
             {(res.gates ?? []).map((g) => (
               <li key={g.name}>

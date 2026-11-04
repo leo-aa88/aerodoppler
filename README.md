@@ -121,10 +121,13 @@ Mode A pairs flights whose delayed-CPA difference equals the observed event sepa
 matches the known clock; curves are scored on a whitened spectrogram with harmonics, an RPM-drift
 nuisance and **one shared clock origin** (event 2 is never slid independently); soft silence
 term; 100 m → 25 m refinement; abstention when evidence is insufficient; and a graded
-**confidence verdict** (high / medium / low) from five gates: evidence above a chance-match null
-drawn from the recording itself, clock lock across events, margin over the best different-flight
-rival, no unheard close pass, bounded landscape radius. `docs/theory.md` has the details and the
-known degeneracies.
+**confidence verdict** (high / medium / low) from ten gates: evidence above a chance-match null
+drawn from the recording itself (failing visibly when the clip is too short to estimate one),
+clock lock across events, margin over the best different-flight rival and over the best distinct
+location, no unheard close pass, bounded landscape radius, track support, search completeness,
+sensitivity to the nuisance physics, and event shape (both Doppler plateaus reached). Distinct
+locations the winner does not clearly beat are listed as alternatives. `docs/theory.md` has the
+details and the known degeneracies.
 
 ## Benchmarks (honest summary)
 
@@ -141,9 +144,10 @@ known degeneracies.
   18 answered / 11 abstained; answered top-1 median **391 m**, best-of-top-3 median 179 m,
   correct aircraft 83 %; over all 29 incl. abstained candidates top-1 median 466 m, 55 % within
   500 m, 38 % beyond 1 km (mostly the mirror solution of a single pass). Details and the per-case
-  table in `IMPLEMENTATION_REPORT.md` §M7; raw JSON in `docs/livermore_benchmark_2026-11-03.json`.
-  The nine-gate confidence grade marks most mirror solutions low but still grades one 3.4 km
-  answer high, so grades are a warning system, not a guarantee.
+  table in `IMPLEMENTATION_REPORT.md` §M7; raw JSON in `docs/livermore_benchmark_2026-11-04.json`.
+  The ten-gate confidence grade marks the mirror solutions low or medium; the 3 answers graded
+  high are all the right aircraft (worst 466 m), but that is 3 cases, and the grades remain a
+  warning system, not a guarantee.
   `aerodoppler benchmark --manifest cases.json` runs the same protocol on your own consented
   recordings. Every score remains labelled uncalibrated.
 

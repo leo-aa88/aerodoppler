@@ -140,6 +140,17 @@ def test_confidence_gates_grading():
     # a mirror solution (same flight, other side of the track) within 0.1 z -> not high
     assert gate_results(**{**good, "margin_distinct_location_z": 0.1})[0] == "low"
     assert gate_results(**{**good, "margin_distinct_location_z": 0.3})[0] == "medium"
+    # a null that could not be estimated (clip too short) must fail visibly, never pass
+    grade, gates = gate_results(**{**good, "null_n": [48, 3]})
+    assert grade == "low"
+    core = next(g for g in gates if g["name"] == "core_matches")
+    assert not core["passed"] and "NOT estimable" in core["detail"]
+    assert gate_results(**{**good, "null_n": [48, 8]})[0] == "high"
+    # an event that never reaches its plateaus caps the grade at medium
+    grade, gates = gate_results(**{**good, "event_flags": [[], ["plateaus_not_reached"]]})
+    assert grade == "medium"
+    assert not next(g for g in gates if g["name"] == "event_shape")["passed"]
+    assert gate_results(**{**good, "event_flags": [["short_event"], []]})[0] == "high"
     # single event is enough in known-time mode
     assert (
         gate_results(
