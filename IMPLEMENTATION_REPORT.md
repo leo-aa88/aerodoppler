@@ -382,23 +382,13 @@ from the ~100 m aspiration; they are reproducible from `docs/livermore_benchmark
 ### Final test summary (observed, final code)
 
 ```
-$ AERODOPPLER_OFFLINE=true uv run pytest -q -m "not network" --durations=12
-52 passed, 1 deselected, 1 warning in 771.71s (0:12:51)
+$ AERODOPPLER_OFFLINE=true uv run pytest -q -m "not network" --durations=8
+56 passed, 1 deselected, 1 warning in 518.51s (0:08:38)
 ```
-(run concurrently with a 6-worker benchmark; alone the suite takes ~8 min.) Slowest:
-```
-389.12s call     tests/e2e/test_api.py::test_full_flow
-246.22s call     tests/integration/test_search_synthetic.py::test_mode_a_unknown_time_recovers_location_and_clock
-41.87s setup    tests/integration/test_search_synthetic.py::test_auto_events_found
-35.26s call     tests/integration/test_search_synthetic.py::test_mode_b_known_time_single_event
-15.79s setup    tests/e2e/test_api.py::test_health_and_privacy_defaults
-8.56s call     tests/unit/test_ridges.py::test_detector_finds_both_events_and_rejects_hum
-3.06s call     tests/integration/test_search_synthetic.py::test_missing_dem_is_an_explicit_error
-2.56s call     tests/integration/test_adsb_pipeline.py::test_full_local_import_and_query
-```
-Lint: `uv run ruff check src tests` → All checks passed; `ruff format --check` → formatted.
-Network-marked test (3DEP + Copernicus online fetch) passes when run with network access
-(`uv run pytest -m network`); it is deselected offline.
+(run while a 8-worker benchmark was using the machine). 36 unit, 13 integration/e2e-API/CLI
+and 7 slow synthetic end-to-end tests. Lint: `uv run ruff check src tests` → All checks passed;
+`ruff format --check` → formatted. The network-marked test (3DEP + Copernicus online fetch)
+passed when run with network access (`uv run pytest -m network` → 1 passed, 22.5 s).
 
 ## Definition of done — status against SPEC §1 and §13
 
