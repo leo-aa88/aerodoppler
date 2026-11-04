@@ -691,6 +691,15 @@ def benchmark(
     ),
     seeds: str = typer.Option("1", "--seeds"),
     snr_db: float = typer.Option(10.0, "--snr-db"),
+    livermore: Path | None = typer.Option(
+        None,
+        "--livermore",
+        help="directory with the Zenodo 23424278 files: REAL-recording benchmark (needs --datasets of the imported days)",
+    ),
+    datasets: str | None = typer.Option(
+        None, "--datasets", help="comma-separated dataset ids for --livermore"
+    ),
+    max_cases: int | None = typer.Option(None, "--max-cases"),
     oracle_events: bool = typer.Option(
         False,
         "--oracle-events",
@@ -717,7 +726,19 @@ def benchmark(
 
     s = get_settings()
     echo = lambda m: typer.secho(m, err=True)  # noqa: E731
-    if real_trajectories:
+    if livermore is not None:
+        from aerodoppler.validation.livermore import run_livermore_benchmark
+
+        rep = run_livermore_benchmark(
+            s,
+            livermore,
+            out,
+            [d for d in (datasets or "").split(",") if d],
+            workers=workers,
+            max_cases=max_cases,
+            log=echo,
+        )
+    elif real_trajectories:
         obs = [
             (p.split(":")[0], float(p.split(":")[1]), float(p.split(":")[2]))
             for p in (observers or "").split(";")
