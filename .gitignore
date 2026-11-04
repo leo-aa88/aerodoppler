@@ -1,6 +1,6 @@
 # data (never commit recordings, archives, derived rasters, runs)
-data/
-!data/.gitkeep
+/data/
+!/data/.gitkeep
 *.wav
 *.flac
 *.mp3

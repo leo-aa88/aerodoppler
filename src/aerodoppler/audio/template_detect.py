@@ -200,8 +200,9 @@ def detect_flyovers(spec: Spectrogram, cfg: TemplateConfig | None = None) -> lis
         p, k = np.unravel_index(int(np.argmax(scores[:, :, ci])), scores.shape[:2])
         v, d = params[p]
         x0 = np.array([np.log(f_vals[k]), np.log(v), np.log(d), t_centres[ci]])
-        obj = lambda x: (
-            -_curve_score(
+
+        def obj(x: np.ndarray, spec: Spectrogram = spec, cfg: TemplateConfig = cfg) -> float:
+            return -_curve_score(
                 spec,
                 float(np.exp(x[0])),
                 float(np.clip(np.exp(x[1]), 20, 300)),
@@ -209,7 +210,7 @@ def detect_flyovers(spec: Spectrogram, cfg: TemplateConfig | None = None) -> lis
                 float(x[3]),
                 cfg,
             )
-        )  # noqa: E731
+
         r = minimize(
             obj, x0, method="Nelder-Mead", options={"xatol": 1e-3, "fatol": 1e-3, "maxiter": 300}
         )
