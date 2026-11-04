@@ -1,5 +1,13 @@
 # AeroDoppler
 
+[![CI](https://github.com/leo-aa88/aerodoppler/actions/workflows/ci.yml/badge.svg)](https://github.com/leo-aa88/aerodoppler/actions/workflows/ci.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Flight data: ODbL 1.0](https://img.shields.io/badge/flight%20data-ODbL%201.0-orange.svg)](https://www.adsb.lol/docs/open-data/historical)
+[![Status: research](https://img.shields.io/badge/status-research%20software-yellow.svg)](IMPLEMENTATION_REPORT.md)
+
 Local-first research tool that estimates where a **stationary recording you own** was made,
 by matching weak propeller-aircraft Doppler ridges in its spectrogram against historical ADS-B
 trajectories (ADSB.lol archive) with an emission-time-correct acoustic forward model.
