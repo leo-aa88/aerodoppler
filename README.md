@@ -123,9 +123,9 @@ known degeneracies.
 * **Real recordings** (Pathak Livermore set, Zenodo 23424278, CC BY 4.0; 29 single-pass phone
   recordings on two days, recorder position trilaterated from the published track offsets,
   events detected blind, known-time ±2 s, 4 km offset box, full-day real traffic + 3DEP):
-  16 answered / 13 abstained; answered top-1 median **391 m**, best-of-top-3 median 179 m,
-  correct aircraft 88 %; over all 29 incl. abstained candidates top-1 median 482 m, 54 % within
-  500 m, 39 % beyond 1 km (mostly the mirror solution of a single pass). Details and the per-case
+  18 answered / 11 abstained; answered top-1 median **391 m**, best-of-top-3 median 179 m,
+  correct aircraft 83 %; over all 29 incl. abstained candidates top-1 median 466 m, 55 % within
+  500 m, 38 % beyond 1 km (mostly the mirror solution of a single pass). Details and the per-case
   table in `IMPLEMENTATION_REPORT.md` §M7; raw JSON in `docs/livermore_benchmark_2026-11-03.json`.
   `aerodoppler benchmark --manifest cases.json` runs the same protocol on your own consented
   recordings. Every score remains labelled uncalibrated.

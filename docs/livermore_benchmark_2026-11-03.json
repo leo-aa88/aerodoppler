@@ -2,7 +2,7 @@
   "label": "REAL RECORDINGS (Pathak Livermore set, CC BY 4.0) \u2014 truth = trilaterated recorder (not surveyed); audio start derived from the published ridge; events detected blind; known-time mode \u00b12 s; 4 km box offset from the recorder",
   "zenodo": "23424278",
   "aerodoppler_version": "0.1.0",
-  "git_sha": "e359aec7a13467d5cc00961c4f31f445831bd39c",
+  "git_sha": "73432831b78e97ef58b1efa620bc0b64bf9e4799",
   "trilateration": {
     "lat": 37.663202075359926,
     "lon": -121.78186821134538,
@@ -63,26 +63,27 @@
   ],
   "summary": {
     "n_cases": 29,
-    "n_answered": 16,
-    "n_abstained": 13,
-    "abstention_rate": 0.4482758620689655,
+    "n_answered": 18,
+    "n_abstained": 11,
+    "abstention_rate": 0.3793103448275862,
     "abstention_reasons": {
-      "weak_fit": 12,
-      "no_candidate_geometry": 1
+      "weak_fit": 11
     },
     "top1_error_m": {
       "median": 390.5155191645914,
-      "p90": 5017.487523739258,
+      "p90": 4392.4036865679045,
       "max": 6746.081289221,
       "values": [
+        1500.3,
         3126.5,
         153.3,
         84.6,
-        6645.8,
+        6733.2,
         465.6,
+        81.5,
         6746.1,
         167.5,
-        1513.0,
+        2121.2,
         1060.8,
         67.4,
         3389.2,
@@ -95,15 +96,15 @@
     },
     "top3_min_error_m": {
       "median": 178.72556683941463,
-      "p90": 2223.2798784702463
+      "p90": 2186.8383470329404
     },
-    "success_rate_top1_within_300m": 0.4375,
-    "success_rate_top3_within_300m": 0.6875,
-    "false_match_rate_top1_over_1km": 0.375,
-    "flights_correct_rate": 0.875,
+    "success_rate_top1_within_300m": 0.4444444444444444,
+    "success_rate_top3_within_300m": 0.6666666666666666,
+    "false_match_rate_top1_over_1km": 0.3888888888888889,
+    "flights_correct_rate": 0.8333333333333334,
     "runtime_s": {
-      "median": 12.901270866394043,
-      "max": 32.51112127304077
+      "median": 9.976722955703735,
+      "max": 17.711994886398315
     },
     "calibration_note": "scores are relative, uncalibrated fit values; no confidence intervals are claimed"
   },
@@ -161,17 +162,17 @@
       "R_min_m": 2157.9328791714274,
       "trilateration_residual_m": 0.0918342359802864,
       "case_id": "N3012N_R40",
-      "abstained": true,
-      "abstention_reason": "weak_fit",
-      "top1_error_m": 2033.440975796703,
-      "topk_min_error_m": 2033.440975796703,
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 1500.3404163800203,
+      "topk_min_error_m": 1347.2533035624122,
       "top1_flights_correct": false,
-      "top1_score": 0.3941654329405899,
-      "runner_up_gap_z": 0.03128793886869485,
-      "runtime_s": 11.4445960521698,
+      "top1_score": 1.4437179323591776,
+      "runner_up_gap_z": 0.0004985510198747267,
+      "runtime_s": 13.018109798431396,
       "n_candidates": 5,
       "notes": {
-        "run_id": "run_6c2d85a32ae5",
+        "run_id": "run_6d8e91a52213",
         "top1_flights": [
           "a4f9f8"
         ],
@@ -186,11 +187,7 @@
           "ridge_t_first_rel_s": 5.249666690826416,
           "ridge_t_last_rel_s": 75.0956666469574
         },
-        "abstention": {
-          "abstained": true,
-          "reason": "weak_fit",
-          "detail": "best relative fit score 0.39 < 1.2 (no convincing ridge energy along any predicted curve)"
-        },
+        "abstention": null,
         "n_candidates": 5
       }
     },
@@ -210,10 +207,10 @@
       "top1_flights_correct": true,
       "top1_score": 1.6455461322509612,
       "runner_up_gap_z": 0.1359861506622917,
-      "runtime_s": 10.59771728515625,
+      "runtime_s": 10.56448483467102,
       "n_candidates": 4,
       "notes": {
-        "run_id": "run_6c101a469dfb",
+        "run_id": "run_9972801f9a37",
         "top1_flights": [
           "a347eb"
         ],
@@ -248,10 +245,10 @@
       "top1_flights_correct": true,
       "top1_score": 2.5688844441543464,
       "runner_up_gap_z": 0.02659160737874977,
-      "runtime_s": 8.866988897323608,
+      "runtime_s": 9.076544046401978,
       "n_candidates": 5,
       "notes": {
-        "run_id": "run_01e7d936d43b",
+        "run_id": "run_db371b005c56",
         "top1_flights": [
           "acade8"
         ],
@@ -286,10 +283,10 @@
       "top1_flights_correct": true,
       "top1_score": 2.9408598668856403,
       "runner_up_gap_z": 0.48468016372081557,
-      "runtime_s": 15.899749994277954,
+      "runtime_s": 13.61504316329956,
       "n_candidates": 3,
       "notes": {
-        "run_id": "run_42b292411efa",
+        "run_id": "run_808b08e16b07",
         "top1_flights": [
           "a95163"
         ],
@@ -319,15 +316,15 @@
       "case_id": "N563FX_R21",
       "abstained": false,
       "abstention_reason": null,
-      "top1_error_m": 6645.774535031268,
+      "top1_error_m": 6733.211092849428,
       "topk_min_error_m": 5732.646057434952,
       "top1_flights_correct": false,
-      "top1_score": 1.9096592062030613,
-      "runner_up_gap_z": 0.6088326605102332,
-      "runtime_s": 11.072232723236084,
+      "top1_score": 1.9326244098518406,
+      "runner_up_gap_z": 0.6317978641590125,
+      "runtime_s": 8.817853689193726,
       "n_candidates": 5,
       "notes": {
-        "run_id": "run_e33675170141",
+        "run_id": "run_c5b1e501ea2a",
         "top1_flights": [
           "a70825"
         ],
@@ -360,12 +357,12 @@
       "top1_error_m": 4567.236232021714,
       "topk_min_error_m": 3816.7694480288365,
       "top1_flights_correct": false,
-      "top1_score": -0.49722372837232115,
-      "runner_up_gap_z": 0.0720558903753003,
-      "runtime_s": 10.668142080307007,
+      "top1_score": -0.49722641534697193,
+      "runner_up_gap_z": 0.07205320340064952,
+      "runtime_s": 9.51348614692688,
       "n_candidates": 5,
       "notes": {
-        "run_id": "run_2d6ef643dd00",
+        "run_id": "run_dbc89aa8ace5",
         "top1_flights": [
           "a287a0"
         ],
@@ -399,15 +396,15 @@
       "case_id": "N8085W_R27",
       "abstained": true,
       "abstention_reason": "weak_fit",
-      "top1_error_m": 99.2988833334523,
-      "topk_min_error_m": 99.2988833334523,
+      "top1_error_m": 63.761948233457765,
+      "topk_min_error_m": 63.761948233457765,
       "top1_flights_correct": true,
-      "top1_score": 1.0613617214701492,
-      "runner_up_gap_z": 0.09756814385065715,
-      "runtime_s": 10.483117580413818,
-      "n_candidates": 3,
+      "top1_score": 0.8601711611661783,
+      "runner_up_gap_z": 0.1133665725398737,
+      "runtime_s": 9.786044120788574,
+      "n_candidates": 4,
       "notes": {
-        "run_id": "run_0b56c45b2f2f",
+        "run_id": "run_52efd445f250",
         "top1_flights": [
           "ab02b1"
         ],
@@ -425,9 +422,9 @@
         "abstention": {
           "abstained": true,
           "reason": "weak_fit",
-          "detail": "best relative fit score 1.06 < 1.2 (no convincing ridge energy along any predicted curve)"
+          "detail": "best relative fit score 0.86 < 1.2 (no convincing ridge energy along any predicted curve)"
         },
-        "n_candidates": 3
+        "n_candidates": 4
       }
     },
     {
@@ -446,10 +443,10 @@
       "top1_flights_correct": true,
       "top1_score": -0.9421507476519738,
       "runner_up_gap_z": 0.00048204239788929293,
-      "runtime_s": 10.227426290512085,
+      "runtime_s": 7.816620826721191,
       "n_candidates": 4,
       "notes": {
-        "run_id": "run_8275f6dcbb2d",
+        "run_id": "run_0095e09b5ef6",
         "top1_flights": [
           "a49238"
         ],
@@ -488,10 +485,10 @@
       "top1_flights_correct": true,
       "top1_score": 3.9307497329478185,
       "runner_up_gap_z": 0.008096034099196903,
-      "runtime_s": 13.117139101028442,
+      "runtime_s": 14.822904825210571,
       "n_candidates": 5,
       "notes": {
-        "run_id": "run_59f8afd98811",
+        "run_id": "run_90204936f3fa",
         "top1_flights": [
           "a4df4f"
         ],
@@ -521,15 +518,15 @@
       "case_id": "N413AK_R49",
       "abstained": true,
       "abstention_reason": "weak_fit",
-      "top1_error_m": 5701.504880892115,
-      "topk_min_error_m": 5490.461105997976,
+      "top1_error_m": 5625.983123584965,
+      "topk_min_error_m": 1880.9133877480567,
       "top1_flights_correct": false,
-      "top1_score": 0.7572677793205301,
-      "runner_up_gap_z": 0.22193489475006356,
-      "runtime_s": 9.088673830032349,
-      "n_candidates": 4,
+      "top1_score": 0.6495269526943246,
+      "runner_up_gap_z": 0.2085269383214916,
+      "runtime_s": 12.19697117805481,
+      "n_candidates": 5,
       "notes": {
-        "run_id": "run_31b1fd5c5ba7",
+        "run_id": "run_076822a243a4",
         "top1_flights": [
           "a14c3e"
         ],
@@ -547,9 +544,9 @@
         "abstention": {
           "abstained": true,
           "reason": "weak_fit",
-          "detail": "best relative fit score 0.76 < 1.2 (no convincing ridge energy along any predicted curve)"
+          "detail": "best relative fit score 0.65 < 1.2 (no convincing ridge energy along any predicted curve)"
         },
-        "n_candidates": 4
+        "n_candidates": 5
       }
     },
     {
@@ -561,18 +558,20 @@
       "R_min_m": 1427.3845223653218,
       "trilateration_residual_m": -0.019624536077117227,
       "case_id": "N4004R_R19",
-      "abstained": true,
-      "abstention_reason": "no_candidate_geometry",
-      "top1_error_m": null,
-      "topk_min_error_m": null,
-      "top1_flights_correct": null,
-      "top1_score": null,
-      "runner_up_gap_z": null,
-      "runtime_s": 3.500025987625122,
-      "n_candidates": 0,
+      "abstained": false,
+      "abstention_reason": null,
+      "top1_error_m": 81.54311665161818,
+      "topk_min_error_m": 81.54311665161818,
+      "top1_flights_correct": true,
+      "top1_score": 1.3174601133644277,
+      "runner_up_gap_z": 0.23799165527568134,
+      "runtime_s": 13.785171031951904,
+      "n_candidates": 5,
       "notes": {
-        "run_id": "run_41f4873068bd",
-        "top1_flights": null,
+        "run_id": "run_7a2ece1b3310",
+        "top1_flights": [
+          "a4af95"
+        ],
         "truth_icao24": "a4af95",
         "event_source": "auto",
         "audio_start": {
@@ -584,12 +583,8 @@
           "ridge_t_first_rel_s": 4.999541521072388,
           "ridge_t_last_rel_s": 96.57954168319702
         },
-        "abstention": {
-          "abstained": true,
-          "reason": "no_candidate_geometry",
-          "detail": "no grid point has flights whose delayed-CPA timing matches the event separation / known time within tolerance and the speed & slant bounds"
-        },
-        "n_candidates": 0
+        "abstention": null,
+        "n_candidates": 5
       }
     },
     {
@@ -608,10 +603,10 @@
       "top1_flights_correct": true,
       "top1_score": 1.5765967300922652,
       "runner_up_gap_z": 0.03703018841664729,
-      "runtime_s": 16.309738397598267,
+      "runtime_s": 14.679929256439209,
       "n_candidates": 4,
       "notes": {
-        "run_id": "run_e23037f1abdb",
+        "run_id": "run_1ed088cabb90",
         "top1_flights": [
           "a24eb7"
         ],
@@ -646,10 +641,10 @@
       "top1_flights_correct": true,
       "top1_score": 2.0521825445333888,
       "runner_up_gap_z": 0.26474294206119264,
-      "runtime_s": 23.38837504386902,
+      "runtime_s": 17.711994886398315,
       "n_candidates": 3,
       "notes": {
-        "run_id": "run_32ffb18a57e6",
+        "run_id": "run_67b1b810c3cd",
         "top1_flights": [
           "a8db5e"
         ],
@@ -684,10 +679,10 @@
       "top1_flights_correct": true,
       "top1_score": -1.2511806053640413,
       "runner_up_gap_z": 0.06867223079370999,
-      "runtime_s": 13.181418180465698,
+      "runtime_s": 10.698309421539307,
       "n_candidates": 4,
       "notes": {
-        "run_id": "run_05d914a2fad4",
+        "run_id": "run_700361431753",
         "top1_flights": [
           "a95128"
         ],
@@ -721,15 +716,15 @@
       "case_id": "N231DT_R57",
       "abstained": false,
       "abstention_reason": null,
-      "top1_error_m": 1512.9714237506826,
-      "topk_min_error_m": 1057.3592444932447,
+      "top1_error_m": 2121.19878068126,
+      "topk_min_error_m": 1671.5402761410926,
       "top1_flights_correct": true,
-      "top1_score": 1.4538668547494709,
-      "runner_up_gap_z": 0.08782486283513835,
-      "runtime_s": 13.504107236862183,
-      "n_candidates": 4,
+      "top1_score": 1.427094254479209,
+      "runner_up_gap_z": 0.08015192297019258,
+      "runtime_s": 11.174185514450073,
+      "n_candidates": 5,
       "notes": {
-        "run_id": "run_a33f8c5f7f1e",
+        "run_id": "run_c739a9e8150f",
         "top1_flights": [
           "a20c94"
         ],
@@ -745,7 +740,7 @@
           "ridge_t_last_rel_s": 75.28143739700317
         },
         "abstention": null,
-        "n_candidates": 4
+        "n_candidates": 5
       }
     },
     {
@@ -764,10 +759,10 @@
       "top1_flights_correct": true,
       "top1_score": 1.9277746801286717,
       "runner_up_gap_z": 0.07415116022616774,
-      "runtime_s": 12.901270866394043,
+      "runtime_s": 9.345490217208862,
       "n_candidates": 4,
       "notes": {
-        "run_id": "run_ab2990c29792",
+        "run_id": "run_91089f16b314",
         "top1_flights": [
           "a1210a"
         ],
@@ -797,15 +792,15 @@
       "case_id": "N913TC_R15",
       "abstained": true,
       "abstention_reason": "weak_fit",
-      "top1_error_m": 283.73004740095524,
-      "topk_min_error_m": 283.73004740095524,
+      "top1_error_m": 49.945217106378315,
+      "topk_min_error_m": 49.945217106378315,
       "top1_flights_correct": true,
-      "top1_score": 0.9244339557840855,
-      "runner_up_gap_z": 0.23670041646026707,
-      "runtime_s": 10.88160753250122,
+      "top1_score": 0.9751033560826174,
+      "runner_up_gap_z": 0.26090870473974925,
+      "runtime_s": 12.33174753189087,
       "n_candidates": 3,
       "notes": {
-        "run_id": "run_202f8a78fcef",
+        "run_id": "run_d654734fd520",
         "top1_flights": [
           "aca37c"
         ],
@@ -823,7 +818,7 @@
         "abstention": {
           "abstained": true,
           "reason": "weak_fit",
-          "detail": "best relative fit score 0.92 < 1.2 (no convincing ridge energy along any predicted curve)"
+          "detail": "best relative fit score 0.98 < 1.2 (no convincing ridge energy along any predicted curve)"
         },
         "n_candidates": 3
       }
@@ -844,10 +839,10 @@
       "top1_flights_correct": true,
       "top1_score": 1.344854713902782,
       "runner_up_gap_z": 0.05694527308265118,
-      "runtime_s": 14.793285846710205,
+      "runtime_s": 11.954748392105103,
       "n_candidates": 3,
       "notes": {
-        "run_id": "run_122bc41405e6",
+        "run_id": "run_90ccc2c959aa",
         "top1_flights": [
           "aaae63"
         ],
@@ -880,12 +875,12 @@
       "top1_error_m": 3389.2005124472485,
       "topk_min_error_m": 3389.2005124472485,
       "top1_flights_correct": false,
-      "top1_score": 2.8830992757016523,
-      "runner_up_gap_z": 0.06466843073807604,
-      "runtime_s": 19.567949533462524,
+      "top1_score": 2.88310229794419,
+      "runner_up_gap_z": 0.06474686886264402,
+      "runtime_s": 8.716397047042847,
       "n_candidates": 5,
       "notes": {
-        "run_id": "run_3a99979d5b21",
+        "run_id": "run_acfa5abbd0fa",
         "top1_flights": [
           "a41852"
         ],
@@ -918,12 +913,12 @@
       "top1_error_m": 115.31697582230188,
       "topk_min_error_m": 115.31697582230188,
       "top1_flights_correct": true,
-      "top1_score": 2.5222077122499376,
-      "runner_up_gap_z": 0.049027287645467155,
-      "runtime_s": 17.62830352783203,
+      "top1_score": 2.522217001028576,
+      "runner_up_gap_z": 0.04816727727142123,
+      "runtime_s": 9.903916120529175,
       "n_candidates": 4,
       "notes": {
-        "run_id": "run_cb41cf67bb5f",
+        "run_id": "run_9a8dacca4ed5",
         "top1_flights": [
           "a7c66e"
         ],
@@ -956,12 +951,12 @@
       "top1_error_m": 283.8862559987884,
       "topk_min_error_m": 134.1572509590215,
       "top1_flights_correct": true,
-      "top1_score": 0.6215309567280631,
-      "runner_up_gap_z": 0.03134519385256129,
-      "runtime_s": 14.039665460586548,
+      "top1_score": 0.6217520519185891,
+      "runner_up_gap_z": 0.03124734599861978,
+      "runtime_s": 6.908113241195679,
       "n_candidates": 3,
       "notes": {
-        "run_id": "run_ce8566f9aae3",
+        "run_id": "run_9ad71e427dc6",
         "top1_flights": [
           "a7ed98"
         ],
@@ -998,12 +993,12 @@
       "top1_error_m": 499.2156376926685,
       "topk_min_error_m": 499.2156376926685,
       "top1_flights_correct": true,
-      "top1_score": 1.7923947131134574,
-      "runner_up_gap_z": 0.007758435865063085,
-      "runtime_s": 13.13231372833252,
+      "top1_score": 1.7923716136985597,
+      "runner_up_gap_z": 0.007758979948586875,
+      "runtime_s": 9.323158264160156,
       "n_candidates": 4,
       "notes": {
-        "run_id": "run_6cf2034a6b0d",
+        "run_id": "run_001e75a56baf",
         "top1_flights": [
           "a63b0a"
         ],
@@ -1036,12 +1031,12 @@
       "top1_error_m": 229.23007062638368,
       "topk_min_error_m": 229.23007062638368,
       "top1_flights_correct": true,
-      "top1_score": 1.8335562635606273,
-      "runner_up_gap_z": 0.0028794152089151037,
-      "runtime_s": 11.856562376022339,
+      "top1_score": 1.8335173407113068,
+      "runner_up_gap_z": 0.002831956215932019,
+      "runtime_s": 9.976722955703735,
       "n_candidates": 4,
       "notes": {
-        "run_id": "run_4c4dc6f4c2db",
+        "run_id": "run_21fafb4a4029",
         "top1_flights": [
           "aacbb7"
         ],
@@ -1074,12 +1069,12 @@
       "top1_error_m": 1459.030094044841,
       "topk_min_error_m": 242.98102105364612,
       "top1_flights_correct": true,
-      "top1_score": -2.3990380271096985,
-      "runner_up_gap_z": 0.08346660667625505,
-      "runtime_s": 26.021926879882812,
+      "top1_score": -2.4034176609937594,
+      "runner_up_gap_z": 0.07935465824944599,
+      "runtime_s": 11.691563606262207,
       "n_candidates": 4,
       "notes": {
-        "run_id": "run_506d4699c0cc",
+        "run_id": "run_792d5090b592",
         "top1_flights": [
           "a4df4f"
         ],
@@ -1116,12 +1111,12 @@
       "top1_error_m": 181.46090792865374,
       "topk_min_error_m": 181.46090792865374,
       "top1_flights_correct": true,
-      "top1_score": 1.6414996315036485,
-      "runner_up_gap_z": 0.22668742249239227,
-      "runtime_s": 8.898844003677368,
+      "top1_score": 1.6415269189824564,
+      "runner_up_gap_z": 0.22550741456113,
+      "runtime_s": 8.757575273513794,
       "n_candidates": 3,
       "notes": {
-        "run_id": "run_7ceb745434dc",
+        "run_id": "run_624f3cbf7532",
         "top1_flights": [
           "a588a9"
         ],
@@ -1154,12 +1149,12 @@
       "top1_error_m": 92.08798561864873,
       "topk_min_error_m": 92.08798561864873,
       "top1_flights_correct": true,
-      "top1_score": 1.0758105076386972,
-      "runner_up_gap_z": 0.005864397840513291,
-      "runtime_s": 11.550654172897339,
+      "top1_score": 1.076992016902068,
+      "runner_up_gap_z": 0.009461552064604195,
+      "runtime_s": 8.254255056381226,
       "n_candidates": 4,
       "notes": {
-        "run_id": "run_2bb29ce486d1",
+        "run_id": "run_17e28f6e6dd7",
         "top1_flights": [
           "ad09eb"
         ],
@@ -1196,12 +1191,12 @@
       "top1_error_m": 315.4227591161894,
       "topk_min_error_m": 315.4227591161894,
       "top1_flights_correct": true,
-      "top1_score": 1.4459378127230282,
-      "runner_up_gap_z": 0.017829863200036877,
-      "runtime_s": 32.51112127304077,
+      "top1_score": 1.5247958926194507,
+      "runner_up_gap_z": 0.02126456138320898,
+      "runtime_s": 12.649550914764404,
       "n_candidates": 4,
       "notes": {
-        "run_id": "run_567984df83e2",
+        "run_id": "run_f5e7472481c1",
         "top1_flights": [
           "abcd86"
         ],
@@ -1234,12 +1229,12 @@
       "top1_error_m": 2484.44098425644,
       "topk_min_error_m": 342.9342035966472,
       "top1_flights_correct": true,
-      "top1_score": 0.5161673449017754,
-      "runner_up_gap_z": 0.05813323945171134,
-      "runtime_s": 15.071337938308716,
+      "top1_score": 0.5161347576150699,
+      "runner_up_gap_z": 0.05802930823044994,
+      "runtime_s": 9.002216339111328,
       "n_candidates": 5,
       "notes": {
-        "run_id": "run_ac46b93e8511",
+        "run_id": "run_a075962eb8a0",
         "top1_flights": [
           "a81ae6"
         ],
@@ -1276,12 +1271,12 @@
       "top1_error_m": 145.49470425504794,
       "topk_min_error_m": 145.49470425504794,
       "top1_flights_correct": true,
-      "top1_score": -0.7840100391988878,
-      "runner_up_gap_z": 0.09624098639818757,
-      "runtime_s": 10.407520294189453,
+      "top1_score": -0.7843816584914046,
+      "runner_up_gap_z": 0.09582888660825994,
+      "runtime_s": 9.878749370574951,
       "n_candidates": 5,
       "notes": {
-        "run_id": "run_100a0fa4b005",
+        "run_id": "run_1bd527f506df",
         "top1_flights": [
           "a4bdd5"
         ],
