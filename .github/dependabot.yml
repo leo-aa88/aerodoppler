@@ -29,6 +29,14 @@ updates:
     groups:
       web-minor-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # TypeScript 7 (native compiler) drops the JS API Next.js 15 uses to read tsconfig.json,
+      # so the "@/..." path aliases stop resolving and the build fails. Revisit with Next.js.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # Node type definitions should follow the Node major the UI is built with (22).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions used in .github/workflows/
   - package-ecosystem: "github-actions"
@@ -51,3 +59,9 @@ updates:
     labels: ["dependencies", "docker"]
     commit-message:
       prefix: "deps(docker)"
+    ignore:
+      # Stay on the Python minor the project is tested on (requires-python >= 3.12, CI uses 3.12).
+      # Newer minors lack prebuilt wheels for compiled deps (orjson, numba, ...) and fail to build
+      # in the slim image. Move deliberately, together with CI.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
