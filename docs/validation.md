@@ -45,9 +45,16 @@ real-world geolocation accuracy, and **no real-recording benchmark has been run 
 Results of both runs are reported in `IMPLEMENTATION_REPORT.md` (section M7) exactly as observed,
 including failures and abstentions.
 
-## 3. Real-recording benchmark (required before any accuracy claim) — NOT DONE
+## 3. Real-recording benchmark — DONE on 29 published recordings (single pass, known time)
 
-Protocol implemented in `aerodoppler benchmark --manifest cases.json`:
+Run on the Pathak Livermore set (Zenodo 23424278, CC BY 4.0) with
+`aerodoppler benchmark --livermore <dir> --datasets …` — results in `IMPLEMENTATION_REPORT.md`
+§M7 and `docs/livermore_benchmark_2026-11-03.json`: 29 passages, 16 answered / 13 abstained,
+answered top-1 median 391 m, best-of-top-3 median 179 m, correct aircraft 88 %. Caveats: one
+site, phone audio, single pass each (mirror ambiguity), recorder position derived by
+trilateration from the published offsets rather than surveyed, known-time mode only.
+
+For your own recordings the protocol is `aerodoppler benchmark --manifest cases.json`:
 
 ```json
 {"cases": [{"id": "site01", "audio": "recordings/site01.wav", "owner_consent": true,

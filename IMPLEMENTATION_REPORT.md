@@ -301,6 +301,83 @@ already possible manually.
   drop per-candidate Python objects in the ultra screen (structured arrays), and prune by the
   consistency prior only as a tie-breaker.
 
+
+
+### M7 results — REAL recordings: Pathak Livermore set (observed, final code)
+
+Data: Zenodo 23424278 (CC BY 4.0; Praveen Pathak), 40 smartphone recordings of light-aircraft
+passages over Livermore, CA, May 2026 — found through the dopplerprint project's README. Used
+here: the 29 passages on 2026-05-16/17 (the two days whose ADSB.lol archives were imported,
+3.5 GB each; the remaining 11 passages are on four other days and were not run). Three further
+passages are trilateration outliers (recorded elsewhere) and were excluded.
+
+Protocol (`aerodoppler benchmark --livermore … --datasets adsblol_2026-05-17_c432e6e8,adsblol_2026-05-16_c432e6e8`):
+recorder position trilaterated from the published per-passage track offsets (37 inliers, rms
+0.06 m against the author's own geometry — i.e. the author's coordinate recovered, not an
+independent survey); audio sample-zero UTC recovered by sliding the published UTC ridge over our
+spectrogram (that is the only use of the published ridge in 25/29 cases); events detected
+**blind** by our detectors (template fit + ridge tracker; in 4 cases neither produced an event
+overlapping the passage and the published ridge was used with harmonic assumed 1); known-time
+Mode B, ±2 s; one event; 4 km box whose centre is offset from the recorder by a seeded 1–2 km;
+the whole day's real ADS-B traffic (26k segments in the 95×90 km import box); real USGS 3DEP
+terrain. Runtime ≈ 13 s per case (4 workers).
+
+| metric | value |
+|---|---|
+| cases | 29 (16 answered, 13 abstained: 12 weak_fit, 1 no_candidate_geometry) |
+| answered — top-1 error median / p90 / max | **391 m / 5.0 km / 6.7 km** |
+| answered — top-1 within 300 m / false match > 1 km | 44 % / 38 % |
+| answered — best of top-3 median / within 300 m | 179 m / 69 % |
+| answered — correct aircraft at rank 1 | 88 % (14/16) |
+| all 29 incl. abstained candidates — top-1 median / within 500 m / > 1 km | 482 m / 54 % / 39 % |
+| all 29 — correct aircraft at rank 1 | 82 % (23/28) |
+| median top-1 by category: V,H constant / V varying / H varying / both varying | 153 m / 181 m / 482 m / 1.8 km |
+
+Reading: a single straight pass with a ±2 s clock pins the aircraft well (82–88 % right) but
+leaves the mirror ambiguity across the track and an along-track slack, which is why
+"best of top-3" (179 m) is much better than top-1 (391 m) and why most errors > 1 km are the
+mirror solution; passages with changing speed and height (where the straight-pass features
+mislead) are the worst. The abstention threshold (`min_score_z` = 1.2, tuned on synthetic
+audio) is conservative for noisy phone audio: 5 of the 13 abstained cases had a top-1 within
+300 m. For comparison, dopplerprint reports 34/40 correct aircraft and a 207 m median with
+the pass position supplied; our numbers are with blind event detection and an offset box, so
+they are not directly comparable. These are the first real-world numbers for this code and
+remain far from the ~100 m aspiration; they are reproducible from
+`docs/livermore_benchmark_2026-11-03.json`.
+
+| case | category | R_min (m) | event source | abstained | top-1 err (m) | best of top-3 (m) | aircraft correct |
+|---|---|---|---|---|---|---|---|
+| N3012N_R40 | V_varying_H_varying | 2158 | auto (template/ridge) | yes (weak_fit) | 2033 | 2033 | False |
+| N310MG_R23 | V_constant_H_varying | 1685 | auto (template/ridge) | no | 3127 | 47 | True |
+| N916KT_R22 | V_constant_H_constant | 1048 | auto (template/ridge) | no | 153 | 153 | True |
+| N7RR_R30 | V_constant_H_varying | 3047 | auto (template/ridge) | no | 85 | 85 | True |
+| N563FX_R21 | V_constant_H_varying | 2100 | auto (template/ridge) | no | 6646 | 5733 | False |
+| N958JX_R50 | V_constant_H_varying | 5068 | auto (template/ridge) | yes (weak_fit) | 4567 | 3817 | False |
+| N8085W_R27 | V_constant_H_varying | 1490 | auto (template/ridge) | yes (weak_fit) | 99 | 99 | True |
+| N394FX_R20 | V_constant_H_constant | 1758 | published ridge fallback | yes (weak_fit) | 545 | 465 | True |
+| N413AK_R05 | V_constant_H_varying | 1332 | auto (template/ridge) | no | 466 | 176 | True |
+| N413AK_R49 | V_constant_H_constant | 3936 | auto (template/ridge) | yes (weak_fit) | 5702 | 5490 | False |
+| N4004R_R19 | V_constant_H_varying | 1427 | auto (template/ridge) | yes (weak_fit) | – | – | None |
+| N248LF_R14 | V_constant_H_varying | 3607 | auto (template/ridge) | no | 6746 | 297 | True |
+| N67WL_R59 | V_constant_H_varying | 3948 | auto (template/ridge) | no | 167 | 167 | True |
+| N7PG_R60 | V_constant_H_varying | 4759 | published ridge fallback | yes (weak_fit) | 530 | 401 | True |
+| N231DT_R57 | V_varying_H_varying | 2484 | auto (template/ridge) | no | 1513 | 1057 | True |
+| N172EL_R35 | V_constant_H_varying | 1373 | auto (template/ridge) | no | 1061 | 163 | True |
+| N913TC_R15 | V_constant_H_varying | 1981 | auto (template/ridge) | yes (weak_fit) | 284 | 284 | True |
+| N788BM_R03 | V_constant_H_constant | 1262 | auto (template/ridge) | no | 67 | 67 | True |
+| N748SP_R36 | V_varying_H_constant | 1357 | auto (template/ridge) | no | 3389 | 3389 | False |
+| N60RS_R11 | V_varying_H_constant | 2817 | auto (template/ridge) | no | 115 | 115 | True |
+| N61NG_R37 | V_constant_H_varying | 2786 | auto (template/ridge) | yes (weak_fit) | 284 | 134 | True |
+| N500MG_R17 | V_constant_H_varying | 5687 | auto (template/ridge) | no | 499 | 499 | True |
+| N795MM_R13 | V_constant_H_varying | 4930 | auto (template/ridge) | no | 229 | 229 | True |
+| N413AK_R16 | V_constant_H_varying | 1628 | published ridge fallback | yes (weak_fit) | 1459 | 243 | True |
+| N456CS_R38 | V_varying_H_constant | 2511 | auto (template/ridge) | no | 181 | 181 | True |
+| N9393T_R02 | V_constant_H_varying | 3006 | auto (template/ridge) | yes (weak_fit) | 92 | 92 | True |
+| N86LP_R01 | V_constant_H_varying | 1595 | auto (template/ridge) | no | 315 | 315 | True |
+| N621KS_R18 | V_constant_H_varying | 3031 | auto (template/ridge) | yes (weak_fit) | 2484 | 343 | True |
+| N4040_R12 | V_constant_H_constant | 1024 | published ridge fallback | yes (weak_fit) | 145 | 145 | True |
+
+
 ### Final test summary (observed, final code)
 
 ```
@@ -335,13 +412,15 @@ Network-marked test (3DEP + Copernicus online fetch) passes when run with networ
 | fail clearly without evidence | done (abstention reasons; auth gate; DEM error; input errors) |
 | `make lint`, `make test`, `make demo` on a clean machine | lint/test/demo pass here; CI workflow provided; **Docker build not verified** (daemon DNS) |
 | screenshots from the running app in README | done (Playwright, `docs/img/ui_*.png`) |
-| real-world benchmark (10–20 consented recordings) | **not done** — no recordings available; protocol + runner implemented |
+| real-world benchmark (10–20 consented recordings) | **done on 29 published CC-BY recordings** (Livermore set; derived recorder position): top-1 median 391 m answered / 482 m all; see M7 |
 
 ## Remaining issues (truthful list)
 
-1. **No real-recording validation.** Every accuracy figure in this report is synthetic or
-   semi-synthetic. Scores stay labelled "relative fit score (uncalibrated)" and
-   `estimated_uncertainty_m` is a score-landscape radius, not a confidence region.
+1. **Real-recording validation is limited.** 29 published single-pass recordings (one site,
+   phone audio, known-time mode only) give a top-1 median of ~400–500 m with the mirror
+   ambiguity dominating; no two-event real recording has been validated. Scores stay labelled
+   "relative fit score (uncalibrated)" and `estimated_uncertainty_m` is a score-landscape
+   radius, not a confidence region; the abstention threshold is not calibrated for real audio.
 2. **Dense GA traffic defeats two-event evidence.** In the Daytona semi-synthetic case (four
    flybys within 1.1 km in ten minutes) the auto-detected events are composites and the search
    returns a false match (flagged ambiguous, low score). Multi-event Mode A (implemented) did not

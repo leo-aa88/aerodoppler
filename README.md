@@ -9,10 +9,10 @@ trajectories (ADSB.lol archive) with an emission-time-correct acoustic forward m
 > localhost, nothing is uploaded, and every result is a *ranked hypothesis with an uncalibrated
 > relative fit score* — never an address or a probability. See `docs/privacy.md`.
 
-Status: all milestones M0–M6 of `SPEC.md` are implemented and tested; M7 has synthetic and
-semi-synthetic benchmarks but **no real-recording benchmark** (no owner-consented field
-recordings were available). Details, observed outputs and the honest remaining-issues list are in
-`IMPLEMENTATION_REPORT.md`.
+Status: all milestones M0–M7 of `SPEC.md` are implemented and tested; M7 includes synthetic,
+semi-synthetic (real ADS-B tracks) and a **real-recording benchmark on 29 published CC-BY phone
+recordings** (single pass, known time) with honest, unflattering numbers. Details, observed
+outputs and the remaining-issues list are in `IMPLEMENTATION_REPORT.md`.
 
 ![Results screen](docs/img/ui_results.png)
 
@@ -117,9 +117,15 @@ details and the known degeneracies.
 * **Semi-synthetic benchmark** on real ADSB.lol trajectories (central Florida, 2026-11-02,
   ~1,250 real segments as distractors, real USGS 3DEP terrain, simulated audio): see
   `IMPLEMENTATION_REPORT.md` §M7 for the per-case table including the failures.
-* Real recordings: **not benchmarked**. `aerodoppler benchmark --manifest cases.json` implements
-  the protocol (`docs/validation.md`); it needs 10–20 owner-consented recordings at surveyed
-  coordinates. Until then no accuracy figure is claimed and every score is labelled uncalibrated.
+* **Real recordings** (Pathak Livermore set, Zenodo 23424278, CC BY 4.0; 29 single-pass phone
+  recordings on two days, recorder position trilaterated from the published track offsets,
+  events detected blind, known-time ±2 s, 4 km offset box, full-day real traffic + 3DEP):
+  16 answered / 13 abstained; answered top-1 median **391 m**, best-of-top-3 median 179 m,
+  correct aircraft 88 %; over all 29 incl. abstained candidates top-1 median 482 m, 54 % within
+  500 m, 39 % beyond 1 km (mostly the mirror solution of a single pass). Details and the per-case
+  table in `IMPLEMENTATION_REPORT.md` §M7; raw JSON in `docs/livermore_benchmark_2026-11-03.json`.
+  `aerodoppler benchmark --manifest cases.json` runs the same protocol on your own consented
+  recordings. Every score remains labelled uncalibrated.
 
 ## Cost and storage caveats
 
