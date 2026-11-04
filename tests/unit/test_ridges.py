@@ -155,3 +155,44 @@ def test_pick_events_adds_time_separated_extras():
         and "c2" not in [e.id for e in got]
         and "weak" not in [e.id for e in got]
     )
+
+
+def test_template_detector_finds_weak_flyby():
+    """Straight-pass template fit on a weak (SNR 0 dB) single flyby: right time, speed and distance."""
+    from scipy.signal import resample_poly
+
+    from aerodoppler.audio.spectrogram import compute_spectrogram
+    from aerodoppler.audio.synthetic import (
+        SyntheticFlight,
+        SyntheticScene,
+        straight_path,
+        synthesize_scene,
+    )
+    from aerodoppler.audio.template_detect import detect_flyovers, flyovers_to_events
+    from aerodoppler.geo.coordinates import LocalFrame
+
+    frame = LocalFrame(40.0, -75.0, 100.0)
+    t0 = 1_700_000_000.0
+    fl = SyntheticFlight(
+        "A",
+        "a00001",
+        t0,
+        t0 + 300,
+        straight_path(frame, t0 + 150, np.array([0.0, 1200.0, 900.0]), 90.0, 65.0),
+        95.0,
+        harmonic_amps=(1.0, 0.5),
+    )
+    scene = SyntheticScene(40.0, -75.0, 100.0, frame, [fl], t0, 300.0, 4000, 343.0)
+    audio, _ = synthesize_scene(
+        scene, np.random.default_rng(5), snr_db_at_cpa=-3.0, hum_hz=None, gust_modulation=0.0
+    )
+    spec = compute_spectrogram(resample_poly(audio.astype(np.float64), 1, 2), 2000)
+    fits = detect_flyovers(spec)
+    assert fits, "no flyover found"
+    best = max(fits, key=lambda f: f.score_z)
+    slant = float(np.hypot(1200.0, 900.0))
+    assert abs(best.t_c_s - (150.0 + slant / 343.0)) < 6.0
+    assert 0.6 < best.distance_m / slant < 1.7 and 0.7 < best.speed_mps / 65.0 < 1.4
+    assert abs(best.f_c_hz - 95.0) / 95.0 < 0.08
+    ev = flyovers_to_events(spec, [best], "r")[0]
+    assert len(ev.ridge_points) > 100 and ev.detection_method == "template-fit"

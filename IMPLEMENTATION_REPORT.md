@@ -382,3 +382,36 @@ uv run aerodoppler audio detect <rec-id>
 uv run aerodoppler search --recording <rec-id> --mode unknown-time --date 2026-11-02 --bbox -81.3,28.9,-81.0,29.2 --events <e1>,<e2> --authorized
 uv run aerodoppler results export <run-id> --format geojson
 ```
+
+## Ideas adopted from related open implementations (reviewed 2026-11-03)
+
+Two independent re-implementations of the same technique were reviewed at the user's request:
+**mjshiggins/dopplertrack** (Python; validated on colsto's Oyster Bay clip at 43 m and on a
+12-hour eagle-cam stream) and **Hexay/dopplerprint** (Rust; 40 real Livermore recordings,
+median 207 m with the pass position supplied). What was taken over (re-implemented here, no
+code copied):
+
+1. **Score over the whole measured window** (dopplertrack): brightness along the modelled
+   curve is averaged over the full event window with uncovered parts counting as zero, so a
+   flight that explains only half a sweep earns half the score. Implemented in the scoring
+   kernel (`valid` fraction multiplies the mean).
+2. **Parametric flyover detector** (dopplertrack's `detect`): sliding grid search of an ideal
+   straight-pass curve (f_c, v, d, t_c) with Nelder–Mead refinement and per-frame ridge
+   re-measurement (`audio/template_detect.py`). It integrates along the whole sweep and found
+   every tested Livermore flyover that the frame-by-frame tracker missed (phone audio in wind,
+   ridge 1.5–3 z above background).
+3. **Real-recording benchmark data** (dopplerprint): the Pathak Livermore set (Zenodo
+   23424278, CC BY 4.0, 40 passages with UTC-stamped ridges and KML tracks). The recorder
+   position is not published; following dopplerprint's approach it is trilaterated from the
+   published per-passage track offsets (our own implementation: 37 inliers, residual rms
+   0.06 m against the author's own geometry; 3 passages recorded elsewhere are excluded), and
+   the audio clock is recovered by sliding the published ridge over our spectrogram.
+   `aerodoppler benchmark --livermore <dir> --datasets …` (`validation/livermore.py`).
+4. **Extra flyovers locked to one clock** (both): implemented as multi-event Mode A
+   (`attach_extra_events`), kept opt-in because it regressed a dense-traffic case.
+
+Ideas noted but not implemented: ICAO Doc 8643 engine classes (OpenSky mirror) or tar1090-db
+instead of the heuristic type table; Open-Meteo weather for speed of sound and uniform wind;
+log-frequency spectrogram; per-flight-pair margin reporting; AWS Terrarium terrain tiles as a
+third DEM source; a contrastive (spectral-neighbourhood) score, which dopplertrack found did
+not help.

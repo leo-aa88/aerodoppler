@@ -129,10 +129,25 @@ def propose_events(
     rec_id: str,
     cfg: DetectorConfig | None = None,
     save: bool = True,
+    template: bool = True,
 ) -> list[DopplerEvent]:
+    """Automatic proposals from two detectors: the Viterbi ridge tracker (precise ridges,
+    harmonic families) and the straight-pass template fit (weak but long sweeps). Template
+    events are added only where no tracked event overlaps them substantially."""
+    from aerodoppler.audio.template_detect import detect_flyovers, flyovers_to_events
+
     spec = ensure_spectrogram(store, settings, rec_id)
     ridges = detect_ridges(spec, cfg)
     events = ridges_to_events(ridges, spec, rec_id)
+    if template:
+        for te in flyovers_to_events(spec, detect_flyovers(spec), rec_id):
+            overlap = any(
+                min(e.audio_end_s, te.audio_end_s) - max(e.audio_start_s, te.audio_start_s)
+                > 0.5 * (te.audio_end_s - te.audio_start_s)
+                for e in events
+            )
+            if not overlap:
+                events.append(te)
     if save:
         events = [store.add_event(e) for e in events]
     return events
