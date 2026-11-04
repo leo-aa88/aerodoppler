@@ -111,9 +111,14 @@ def _score_kernel(
                         nvalid += 1
                         wsum_pts += w_i
                 if nvalid > 0 and nin > 0 and wsum_pts > 0.0:
-                    scores[si, ki, ai] = acc / (wsum_pts * wsum)
-                    coverage[si, ki, ai] = cov / (wsum_pts * wsum)
-                    valid[si, ki, ai] = nvalid / nin
+                    # mean over the WHOLE measured window: parts of the window the modelled
+                    # curve does not cover (flight left the data, landed, window beyond the
+                    # curve) count as zero, so a flight explaining half the sweep earns half
+                    # the score instead of being judged only where it happens to fit
+                    frac = nvalid / nin
+                    scores[si, ki, ai] = acc / (wsum_pts * wsum) * frac
+                    coverage[si, ki, ai] = cov / (wsum_pts * wsum) * frac
+                    valid[si, ki, ai] = frac
     return scores, coverage, valid
 
 
