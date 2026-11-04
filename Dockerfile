@@ -9,6 +9,10 @@ COPY web/ ./
 RUN npm run build
 
 FROM python:3.12-slim-bookworm AS app
+# Links the GHCR package to this repository so the workflow's GITHUB_TOKEN can publish it.
+LABEL org.opencontainers.image.source="https://github.com/leo-aa88/aerodoppler" \
+      org.opencontainers.image.description="AeroDoppler: locate a recording from the Doppler curves of passing aircraft (research software)" \
+      org.opencontainers.image.licenses="MIT"
 ENV PYTHONUNBUFFERED=1 UV_SYSTEM_PYTHON=1 AERODOPPLER_DATA_DIR=/data AERODOPPLER_HOST=0.0.0.0
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libgomp1 git && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
