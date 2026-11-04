@@ -261,33 +261,37 @@ straight second flight 7 m (1.44), ADS-B gap 46 m (1.85), 8 distractors 37 m (1.
 heading mix 7 m (1.73), RPM drift 35 m (1.07). Errors are bounded by the 25 m final grid plus
 the 200 m coarse phase; `nominal_grid_spacing_m` reports the actual resolution.
 
-### M7 results — semi-synthetic benchmark on REAL trajectories (observed)
+### M7 results — semi-synthetic benchmark on REAL trajectories (observed, final code)
 
-`aerodoppler benchmark --real-trajectories adsblol_2026-11-02_1e2f2f08 --observers … --max-assignments 2000000`
-Simulated audio of every real aircraft within 6 km of the observer (random f0 75–135 Hz,
-harmonics, 1/r loss, SNR 10 dB at CPA, 60 Hz hum, gusts) rendered from the **real** ADSB.lol
-tracks via the independent simulator; the search sees the whole real day (≈1,250 airborne
-segments inside the 36×33 km search box) and the real USGS 3DEP DEM. **Still simulated
-acoustics; not a real-recording benchmark.** Cases: three observer sites near Daytona Beach,
-Florida (ormond 29.10/−81.15, deland 29.03/−81.25, daytona_w 29.17/−81.10) × seeds.
+`aerodoppler benchmark --real-trajectories adsblol_2026-11-02_1e2f2f08 --observers … --seeds 1,2 --max-assignments 2000000 --oracle-events`
+(`data/runs/benchmark_realtraj_final/real_trajectory_benchmark.json`). Simulated audio of every
+real aircraft within 6 km of the observer (smoothing-spline paths through the real ADS-B
+positions, random f0 75–135 Hz, harmonics, 1/r loss, SNR 10 dB at CPA, 60 Hz hum, gusts); the
+search sees the whole real day (≈1,250 airborne segments inside the 36×33 km box) and the real
+USGS 3DEP DEM. Three observer sites near Daytona Beach, Florida (a flight-training area with
+pattern-work aircraft), two seeds each. **Still simulated acoustics; not a real-recording
+benchmark.** The "oracle events" column uses the true flights' ridges traced as manual events
+(the operator-annotation workflow) and therefore tests the search alone.
 
-| case | audible aircraft (≤6 km) | closest passes | result (top-1) | flights | runtime |
-|---|---|---|---|---|---|
-| ormond_s1 | 5 | 0.5, 1.7, 2.5, 4.3, 4.3 km | **13.3 m** | correct pair | 823 s (60k cap) |
-| deland_s1 | – | – | **16.1 m** | correct pair | 708 s (60k cap) |
-| daytona_w_s1 | 6 (four within 1.1 km in 10 min) | 0.64, 0.68, 0.67, 1.0, 2.3, 5.7 km | **17.8 km (false match, flagged ambiguous, best score 2.95 vs ≥4 in solved cases)** | wrong | 1,235 s (no cap, 626k pairs) |
-| seed-2 cases | see final table below | | | | |
+| case | audible aircraft (≤ 6 km) | Δt (s) | auto events: top-1 error | auto: flights | oracle events: top-1 error | oracle: flights |
+|---|---|---|---|---|---|---|
+| ormond_s1 | 5 | 755 | 7.6 km | wrong (same aircraft twice) | **25 m** | correct |
+| ormond_s2 | 7 | 1443 | 21.9 km | wrong | 16.5 km | wrong |
+| deland_s1 | 3 | 1053 | 12.1 km | wrong | **55 m** | correct |
+| deland_s2 | 6 | 1168 | **15 m** | correct | 16.1 km | wrong |
+| daytona_w_s1 | 6 | 547 | 15.0 km | wrong | 21.2 km | wrong |
+| daytona_w_s2 | 4 | 1466 | 18.0 km | wrong | 20.9 km | wrong |
 
-Diagnosis of the daytona failure (kept as a known limitation): with four close flybys inside
-ten minutes the auto-detected second event is a composite ridge (its global plateau ratio
-1.608 is impossible for a 63 m/s aircraft), and the search re-interprets the events as other
-aircraft at a different time of day. The ranked list is correctly flagged `ambiguous` and the
-scores are markedly lower than in solved cases, but the system does not abstain. Mitigations
-implemented along the way (local excursion window, slope weighting, imbalance/coverage
-penalties, all-pairs ultra-coarse screen) fixed the other false matches but not this one.
-Proposed next step: joint multi-event Mode A (use all 3–4 detected events at one shared
-t0 instead of a pair) and operator-guided event selection in the spectrogram lab, which is
-already possible manually.
+Summary: automatic events 1/6 within 300 m (median 13.6 km); oracle events 2/6. Earlier
+development runs of the same cases (with the cubic-spline audio artefact described in
+docs/validation.md and before the local-excursion and whole-window scoring changes) had
+scored 13 m and 16 m on ormond_s1/deland_s1 with automatic events; those numbers are
+superseded by this final-code table. Diagnosis (unchanged): in dense training traffic the
+automatically detected events are composites or fragments of several aircraft, and a
+pattern-work aircraft (a5c4d1, a P28A doing circuits all day) offers a comb of similar
+flybys that matches almost any two-event separation; even with oracle ridges two of the four
+failing cases pick that aircraft. The grades and gates (below) are meant to make such answers
+visibly untrustworthy rather than to fix them.
 
 ### Performance (observed on the real-trajectory runs, 6 workers, machine shared)
 
@@ -492,7 +496,18 @@ code copied):
    *different flights*; no penalised unheard close pass; landscape radius ≤ 1 km → high /
    medium / low (`search/rank.py::gate_results`, shown in `result.json`, CLI and UI). On the
    synthetic demo the verdict is **high** (events 20σ and 6σ above chance, margin 3.2 z, radius
-   79 m). Also from fdop: the template detector now requires both halves of a pass to carry
+   79 m). Three further self-distrust gates follow DOPPLERGEIST's `geometry.py` /
+   `finite_search.py` / `matching.py` (reviewed at the user's request): **track_support** (the
+   matched tracks must physically support the fitted CPA — emission CPA ≥ 5 s inside the
+   sampled interval, no > 30 s gap within ±60 s of it, no clamped glitch velocity, plausible
+   speed; datum reported), **search_complete** (retention accounting: the best score discarded
+   at the ultra-coarse and coarse cuts must trail the best kept by ≥ 0.25 z and the pair cap
+   must not have been hit, otherwise the funnel may have dropped a comparable competitor), and
+   **sensitivity_stable** (the winner is re-refined on a ±100 m / 25 m grid under speed of
+   sound ±5 m/s and observer-vs-flight height bias ±150 m; the answer must move < max(300 m,
+   4 grid cells) and lose < 1 z; the scenario table is saved in the manifest). High needs all
+   eight gates; medium additionally requires track_support. DOPPLERGEIST's subset association
+   with explicitly unmatched proposals corresponds to our opt-in multi-event mode. Also from fdop: the template detector now requires both halves of a pass to carry
    evidence (rejects hum, clicks and one-sided plateau pieces), and the silence term weighs an
    unheard aircraft by how much closer it passed than the heard ones. fdop's spatio-temporal
    hash join is conceptually what the Δt pairing here does on (grid point, time bucket) keys;

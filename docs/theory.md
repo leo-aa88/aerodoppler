@@ -152,5 +152,11 @@ coverage ≥ 40 %; two events in unknown-time mode, one in known-time mode), **c
 event's own best clock offset within ±4 s of the shared clock), **margin** (winner beats the best
 rival that uses different flights by ≥ 0.5 z; ≥ 0.25 z for medium), **no unheard close pass**
 (no penalised unheard aircraft; Mode A only) and **radius** (score-landscape radius ≤ 1 km).
-High needs all five, medium needs core + clock + the medium margin, everything else is low.
+Three self-distrust gates were added after DOPPLERGEIST: **track_support** (matched tracks
+physically support the fitted CPA: inside the sampled interval, no gap or glitch near it),
+**search_complete** (retention accounting: nothing comparable to the winner was discarded at a
+cap), **sensitivity_stable** (the answer survives speed-of-sound ±5 m/s and height-bias
+±150 m re-refinement without moving more than max(300 m, 4 cells) or losing more than 1 z).
+High needs all eight, medium needs core + clock + the medium margin + track_support,
+everything else is low.
 The gates and their details are in `result.json`, the CLI summary and the Results screen.

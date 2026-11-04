@@ -286,6 +286,7 @@ class SearchEngine:
         self.counters: list[StageCounter] = []
         self.warnings: list[str] = []
         self.t_start = time.perf_counter()
+        self._completeness: dict[str, Any] = {}
 
     # ---- helpers -----------------------------------------------------------------------
     def _check_cancel(self) -> None:
@@ -545,6 +546,7 @@ class SearchEngine:
 
         # ---- ultra-coarse screen (every pair; ~10 µs each) ----------------------------------
         self._ctx = ctx
+        self._quality = q
         ctx.ultra_cfg = ScoreConfig(
             f0_step_fraction=0.03,
             f0_halfwidth_fraction=0.03,
@@ -561,11 +563,15 @@ class SearchEngine:
                 ctx, coarse_idx, coarse=True, workers=q.workers, ultra=True
             )
             ultra_scores = np.array([r.combined if r is not None else -9.0 for r in ultra_results])
-            coarse_idx = [
-                int(i)
-                for i in np.argsort(-ultra_scores)[: q.ultra_keep_top]
-                if ultra_scores[i] > -5
-            ]
+            order_u = np.argsort(-ultra_scores)
+            coarse_idx = [int(i) for i in order_u[: q.ultra_keep_top] if ultra_scores[i] > -5]
+            dropped_u = order_u[q.ultra_keep_top :]
+            self._completeness["ultra"] = {
+                "scheduled": int(len(assignments)),
+                "kept": int(len(coarse_idx)),
+                "best_discarded": float(ultra_scores[dropped_u].max()) if len(dropped_u) else None,
+                "best_kept": float(ultra_scores[order_u[0]]),
+            }
             self.counters.append(
                 StageCounter(
                     stage="ultra_coarse_screen",
@@ -594,8 +600,17 @@ class SearchEngine:
         self._stage(
             "coarse_scored", best=float(np.nanmax(coarse_scores)) if len(coarse_scores) else None
         )
-        keep = np.argsort(-coarse_scores)[: q.coarse_keep_top]
-        keep = [int(i) for i in keep if coarse_scores[i] > -5]
+        order_c = np.argsort(-coarse_scores)
+        keep = [int(i) for i in order_c[: q.coarse_keep_top] if coarse_scores[i] > -5]
+        dropped_c = order_c[q.coarse_keep_top :]
+        finite_dropped = coarse_scores[dropped_c] if len(dropped_c) else np.array([])
+        finite_dropped = finite_dropped[finite_dropped > -5]
+        self._completeness["coarse"] = {
+            "scheduled": int(len(coarse_idx)),
+            "kept": int(len(keep)),
+            "best_discarded": float(finite_dropped.max()) if finite_dropped.size else None,
+            "best_kept": float(coarse_scores[order_c[0]]) if len(order_c) else None,
+        }
 
         # ---- fine scoring + silence -----------------------------------------------------
         t_f = time.perf_counter()
@@ -855,6 +870,147 @@ class SearchEngine:
                 + (sa.assignment.class_prior if q.prefer_propeller_types else 0.0)
             )
 
+    def _track_support(self, ctx: EngineContext, winner: ScoredAssignment) -> tuple[bool, str]:
+        """The matched tracks must physically support the fitted CPA: emission CPA strictly
+        inside the sampled interval, no large sample gap near it, no clamped (glitch) velocity,
+        and the altitude datum is reported."""
+        ok, notes = True, []
+        for si, tau in zip(winner.assignment.seg_idx, winner.assignment.tau, strict=True):
+            if si < 0 or not np.isfinite(tau):
+                continue
+            seg = ctx.segments[si]
+            traj = seg.traj_build.trajectory
+            assert traj is not None
+            cpa = closest_approach(traj, winner.observer_ecef, ctx.c.c_mps)
+            te = cpa.t_emit_cpa
+            edge = min(te - traj.t_start, traj.t_end - te)
+            near = (traj.t >= te - 60.0) & (traj.t <= te + 60.0)
+            gaps = np.diff(traj.t[near]) if near.sum() > 1 else np.array([0.0])
+            speed = float(np.linalg.norm(traj.velocity(np.array([te]))[0]))
+            problems = []
+            if edge < 5.0:
+                problems.append(f"CPA {edge:.0f} s from the track end (unsupported)")
+            if gaps.size and gaps.max() > 30.0:
+                problems.append(f"{gaps.max():.0f} s sample gap near CPA")
+            if speed >= 399.0:
+                problems.append("clamped glitch velocity at CPA")
+            if not (15.0 <= speed <= 350.0):
+                problems.append(f"implausible speed {speed:.0f} m/s at CPA")
+            gmax = float(gaps.max()) if gaps.size else 0.0
+            notes.append(
+                f"{seg.icao24}: CPA {edge:.0f} s inside track, max gap near CPA {gmax:.0f} s, speed {speed:.0f} m/s, datum {seg.traj_build.datum}"
+                + (" — " + "; ".join(problems) if problems else "")
+            )
+            if problems:
+                ok = False
+        return ok, "; ".join(notes) if notes else "no matched tracks"
+
+    def _completeness_gate(self) -> tuple[bool, str]:
+        """The funnel must not have discarded a competitor comparable to the winner."""
+        notes, ok = [], True
+        for stage in ("ultra", "coarse"):
+            c = self._completeness.get(stage)
+            if not c:
+                continue
+            bd, bk = c.get("best_discarded"), c.get("best_kept")
+            notes.append(
+                f"{stage}: {c['kept']}/{c['scheduled']} kept, best discarded {bd if bd is None else round(bd, 2)} vs best kept {bk if bk is None else round(bk, 2)}"
+            )
+            if bd is not None and bk is not None and bd >= bk - 0.25:
+                ok = False
+        if any("exceed the cap" in w for w in self.warnings):
+            ok = False
+            notes.append("pair cap hit (consistency-prior selection): coverage incomplete")
+        return ok, "; ".join(notes) if notes else "no truncation"
+
+    def _sensitivity(
+        self,
+        ctx: EngineContext,
+        winner: ScoredAssignment,
+        q,
+        c_sigma_mps: float = 5.0,
+        alt_bias_m: float = 150.0,
+    ) -> tuple[bool, str, list[dict[str, Any]]]:
+        """Re-refine the winner on a ±100 m / 25 m grid under declared perturbations (speed of
+        sound ±5 m/s; observer-vs-flight height bias ±150 m) and report how far the answer
+        moves and how much it loses. Engineering scenarios, not a confidence region."""
+        from aerodoppler.geo.coordinates import ecef_to_geodetic, geodetic_to_ecef, haversine_m
+        from aerodoppler.physics.propagation import SoundSpeed
+
+        lat0, lon0, h0 = ecef_to_geodetic(winner.observer_ecef)
+        scenarios = [
+            ("nominal", 0.0, 0.0),
+            ("c-5", -c_sigma_mps, 0.0),
+            ("c+5", c_sigma_mps, 0.0),
+            ("height-150", 0.0, -alt_bias_m),
+            ("height+150", 0.0, alt_bias_m),
+        ]
+        base_c = ctx.c
+        results = []
+        nominal_total = None
+        try:
+            for name, dc, dh in scenarios:
+                ctx.c = SoundSpeed(base_c.c_mps + dc, base_c.sigma_mps, base_c.note)
+                frame = ctx.grid.grid.frame
+                centre = geodetic_to_ecef(float(lat0), float(lon0), float(h0) + dh).reshape(3)
+                e0, n0 = frame.ecef_to_enu(centre)[:2]
+                offs = 25.0 * np.arange(-4, 5)
+                ee, nn = np.meshgrid(e0 + offs, n0 + offs)
+                lat, lon = frame.east_north_grid_to_geodetic(ee.ravel(), nn.ravel())
+                pts = geodetic_to_ecef(lat, lon, np.full(lat.shape, float(h0) + dh))
+                best = None
+                for j in range(len(lat)):
+                    taus = tuple(
+                        closest_approach(
+                            ctx.segments[si].traj_build.trajectory, pts[j], ctx.c.c_mps
+                        ).t_receive_cpa
+                        if si >= 0
+                        else float("nan")
+                        for si in winner.assignment.seg_idx
+                    )
+                    a2 = Assignment(
+                        -1,
+                        winner.assignment.seg_idx,
+                        taus,
+                        winner.assignment.slant,
+                        taus[0] - ctx.feats[0].t_center_s,
+                        winner.assignment.class_prior,
+                    )
+                    res = _score_point(ctx, a2, pts[j], coarse=False, taus=taus)
+                    tot = (
+                        res.combined
+                        + (winner.assignment.class_prior if q.prefer_propeller_types else 0.0)
+                        - winner.silence_pen
+                    )
+                    if best is None or tot > best[0]:
+                        best = (tot, float(lat[j]), float(lon[j]))
+                assert best is not None
+                shift = float(haversine_m(best[1], best[2], winner.lat, winner.lon))
+                if name == "nominal":
+                    nominal_total = best[0]
+                results.append(
+                    {
+                        "scenario": name,
+                        "score": round(best[0], 3),
+                        "shift_m": round(shift, 1),
+                        "lat": best[1],
+                        "lon": best[2],
+                    }
+                )
+        finally:
+            ctx.c = base_c
+        max_shift = max(r["shift_m"] for r in results)
+        max_drop = max((nominal_total or 0.0) - r["score"] for r in results)
+        tol = max(300.0, float(winner.spacing_m) * 4)
+        ok = max_shift <= tol and max_drop <= 1.0
+        detail = (
+            f"max position shift {max_shift:.0f} m (tolerance {tol:.0f} m), max score drop {max_drop:.2f} z over "
+            + ", ".join(
+                f"{r['scenario']}: {r['shift_m']:.0f} m / {r['score']:.2f}" for r in results
+            )
+        )
+        return ok, detail, results
+
     def _confidence_gates(
         self,
         ctx: EngineContext,
@@ -900,8 +1056,15 @@ class SearchEngine:
         wset = set(winner.assignment.seg_idx)
         riv = [r.total for r in rivals if set(r.assignment.seg_idx) != wset]
         margin = (winner.total - max(riv)) if riv else None
+        track = self._track_support(ctx, winner)
+        complete = self._completeness_gate()
+        sens_ok, sens_detail, sens_rows = self._sensitivity(ctx, winner, self._quality)
+        self._sensitivity_rows = sens_rows
         return gate_results(
             n_events=len(ctx.feats),
+            track_support=track,
+            completeness=complete,
+            sensitivity=(sens_ok, sens_detail),
             mode_known_time=ctx.mode == SearchMode.KNOWN_TIME,
             per_event_scores=[e.score for e in full.per_event],
             per_event_coverage=[e.coverage for e in full.per_event],
@@ -1056,6 +1219,8 @@ class SearchEngine:
                 self.warnings.append(
                     f"confidence gates could not be evaluated: {type(e).__name__}: {e}"
                 )
+        manifest["sensitivity_profile"] = getattr(self, "_sensitivity_rows", [])
+        manifest["search_completeness"] = self._completeness
         result = SearchResult(
             run_id=run_id,
             request=req,

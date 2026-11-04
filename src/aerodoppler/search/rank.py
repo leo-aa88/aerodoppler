@@ -80,6 +80,9 @@ def gate_results(
     margin_distinct_flights_z: float | None,
     unheard_close_pass_penalty: float | None,
     landscape_radius_m: float | None,
+    track_support: tuple[bool, str] | None = None,
+    completeness: tuple[bool, str] | None = None,
+    sensitivity: tuple[bool, str] | None = None,
     min_coverage: float = 0.4,
     clock_tol_s: float = 4.0,
     margin_high_z: float = 0.5,
@@ -162,9 +165,25 @@ def gate_results(
             "detail": f"score-landscape radius {landscape_radius_m if landscape_radius_m is None else round(landscape_radius_m)} m (<= {radius_max_m:.0f} m required; uncalibrated)",
         }
     )
-    if core and clock and margin_ok and unheard_ok and radius_ok:
+    # self-distrust gates (after DOPPLERGEIST's geometry validation, retention accounting and
+    # sensitivity profiling): the matched tracks must physically support the fit, the funnel
+    # must not have discarded a comparable competitor, and the answer must survive declared
+    # perturbations of the nuisance physics
+    extras_ok = True
+    for name, item in (
+        ("track_support", track_support),
+        ("search_complete", completeness),
+        ("sensitivity_stable", sensitivity),
+    ):
+        if item is None:
+            gates.append({"name": name, "passed": True, "detail": "not evaluated"})
+        else:
+            gates.append({"name": name, "passed": bool(item[0]), "detail": item[1]})
+            extras_ok = extras_ok and bool(item[0])
+    track_ok = track_support is None or bool(track_support[0])
+    if core and clock and margin_ok and unheard_ok and radius_ok and extras_ok:
         grade = "high"
-    elif core and clock and margin_med:
+    elif core and clock and margin_med and track_ok:
         grade = "medium"
     else:
         grade = "low"
