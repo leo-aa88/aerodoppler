@@ -1056,6 +1056,10 @@ class SearchEngine:
         wset = set(winner.assignment.seg_idx)
         riv = [r.total for r in rivals if set(r.assignment.seg_idx) != wset]
         margin = (winner.total - max(riv)) if riv else None
+        far = [
+            r.total for r in rivals if haversine_m(r.lat, r.lon, winner.lat, winner.lon) >= 1000.0
+        ]
+        margin_loc = (winner.total - max(far)) if far else None
         track = self._track_support(ctx, winner)
         complete = self._completeness_gate()
         sens_ok, sens_detail, sens_rows = self._sensitivity(ctx, winner, self._quality)
@@ -1072,6 +1076,7 @@ class SearchEngine:
             null_std=null_std,
             own_clock_offsets_s=own_offsets,
             margin_distinct_flights_z=margin,
+            margin_distinct_location_z=margin_loc,
             unheard_close_pass_penalty=winner.silence_pen if ctx.silence else None,
             landscape_radius_m=landscape_radius_m,
         )

@@ -137,6 +137,9 @@ def test_confidence_gates_grading():
     # thin margin -> medium; unheard close pass -> medium (all else fine)
     assert gate_results(**{**good, "margin_distinct_flights_z": 0.3})[0] == "medium"
     assert gate_results(**{**good, "unheard_close_pass_penalty": 0.6})[0] == "medium"
+    # a mirror solution (same flight, other side of the track) within 0.1 z -> not high
+    assert gate_results(**{**good, "margin_distinct_location_z": 0.1})[0] == "low"
+    assert gate_results(**{**good, "margin_distinct_location_z": 0.3})[0] == "medium"
     # single event is enough in known-time mode
     assert (
         gate_results(

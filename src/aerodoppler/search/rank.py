@@ -80,6 +80,7 @@ def gate_results(
     margin_distinct_flights_z: float | None,
     unheard_close_pass_penalty: float | None,
     landscape_radius_m: float | None,
+    margin_distinct_location_z: float | None = None,
     track_support: tuple[bool, str] | None = None,
     completeness: tuple[bool, str] | None = None,
     sensitivity: tuple[bool, str] | None = None,
@@ -139,6 +140,19 @@ def gate_results(
         margin_med = margin_distinct_flights_z >= margin_medium_z
         mdetail = f"winner beats the best different-flight rival by {margin_distinct_flights_z:.2f} z (high needs {margin_high_z}, medium {margin_medium_z})"
     gates.append({"name": "margin", "passed": margin_ok, "detail": mdetail})
+    # a mirror solution of a single straight pass uses the SAME flight on the other side of
+    # the track, so it escapes the different-flight margin; this gate compares the winner
+    # with the best hypothesis at a distinct location (>= 1 km away), whatever its flights
+    if margin_distinct_location_z is None:
+        loc_ok, loc_med = True, True
+        ldetail = "no rival at a distinct location (>= 1 km) survived"
+    else:
+        loc_ok = margin_distinct_location_z >= margin_high_z
+        loc_med = margin_distinct_location_z >= margin_medium_z
+        ldetail = f"winner beats the best rival >= 1 km away by {margin_distinct_location_z:.2f} z (high needs {margin_high_z}, medium {margin_medium_z})"
+    gates.append({"name": "margin_distinct_location", "passed": loc_ok, "detail": ldetail})
+    margin_ok = margin_ok and loc_ok
+    margin_med = margin_med and loc_med
     if unheard_close_pass_penalty is None:
         gates.append(
             {
