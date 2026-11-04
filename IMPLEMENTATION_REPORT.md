@@ -263,37 +263,85 @@ the 200 m coarse phase; `nominal_grid_spacing_m` reports the actual resolution.
 Re-run on 2026-11-04 with the ten-gate version (`docs/synthetic_benchmark_2026-11-04.json`):
 accuracy unchanged, grades 9 high / 3 medium; details in the reliability pass below.
 
-### M7 results — semi-synthetic benchmark on REAL trajectories (observed, final code)
+### M7 results — semi-synthetic benchmark on REAL trajectories (observed, 2026-11-04, 24 cases)
 
-`aerodoppler benchmark --real-trajectories adsblol_2026-11-02_1e2f2f08 --observers … --seeds 1,2 --max-assignments 2000000 --oracle-events`
-(`data/runs/benchmark_realtraj_final/real_trajectory_benchmark.json`). Simulated audio of every
-real aircraft within 6 km of the observer (smoothing-spline paths through the real ADS-B
-positions, random f0 75–135 Hz, harmonics, 1/r loss, SNR 10 dB at CPA, 60 Hz hum, gusts); the
-search sees the whole real day (≈1,250 airborne segments inside the 36×33 km box) and the real
-USGS 3DEP DEM. Three observer sites near Daytona Beach, Florida (a flight-training area with
-pattern-work aircraft), two seeds each. **Still simulated acoustics; not a real-recording
-benchmark.** The "oracle events" column uses the true flights' ridges traced as manual events
-(the operator-annotation workflow) and therefore tests the search alone.
+`aerodoppler benchmark --real-trajectories adsblol_2026-11-02_1e2f2f08 --observers <12 sites> --seeds 1,2 --max-assignments 2000000 --oracle-events --workers 8`
+(`data/runs/benchmark_realtraj_wide/real_trajectory_benchmark.json`, copied to
+`docs/real_trajectory_benchmark_2026-11-04.json`; code 42ad26f, whose `src/` is identical to the
+ten-gate commit). Simulated audio of every real aircraft within 6 km of the observer
+(smoothing-spline paths through the real ADS-B positions, random f0 75–135 Hz, harmonics, 1/r
+loss, SNR 10 dB at CPA, 60 Hz hum, gusts); the search sees the whole real day (≈1,250 airborne
+segments inside the 36×33 km box) and the real USGS 3DEP DEM. Twelve observer sites across the
+central-Florida box — the three Daytona Beach / DeLand training-area sites of the first run plus
+nine grid points between 28.8–29.4°N and 81.05–81.55°W — two seeds each. Site `n2930w8155` had
+only one close pass on both seeds and is reported as a scenario error ("no suitable pair"),
+leaving 22 answered cases. **Still simulated acoustics; not a real-recording benchmark.** The
+"oracle events" column uses the true flights' ridges traced as manual events (the
+operator-annotation workflow) and therefore tests the search alone. Grade and alternatives are
+the ten-gate output; "alternatives" counts the distinct maxima ≥ 1 km from the top answer that
+the result lists.
 
-| case | audible aircraft (≤ 6 km) | Δt (s) | auto events: top-1 error | auto: flights | oracle events: top-1 error | oracle: flights |
-|---|---|---|---|---|---|---|
-| ormond_s1 | 5 | 755 | 7.6 km | wrong (same aircraft twice) | **25 m** | correct |
-| ormond_s2 | 7 | 1443 | 21.9 km | wrong | 16.5 km | wrong |
-| deland_s1 | 3 | 1053 | 12.1 km | wrong | **55 m** | correct |
-| deland_s2 | 6 | 1168 | **15 m** | correct | 16.1 km | wrong |
-| daytona_w_s1 | 6 | 547 | 15.0 km | wrong | 21.2 km | wrong |
-| daytona_w_s2 | 4 | 1466 | 18.0 km | wrong | 20.9 km | wrong |
+| case | audible (≤ 6 km) | Δt (s) | auto events: error / grade / alternatives | oracle events: error / grade / alternatives | oracle: flights |
+|---|---|---|---|---|---|
+| ormond_s1 | 5 | 755 | 7.6 km / low / 5 | 16.7 km / low / 5 | wrong |
+| ormond_s2 | 7 | 1443 | 21.9 km / low / 2 | 16.5 km / low / 0 | wrong |
+| deland_s1 | 3 | 1053 | 12.1 km / low / 1 | **55 m** / high / 0 | correct |
+| deland_s2 | 6 | 1168 | **15 m** / low / 3 | 16.1 km / low / 1 | wrong |
+| daytona_w_s1 | 6 | 547 | 15.0 km / low / 0 | 21.2 km / low / 5 | wrong |
+| daytona_w_s2 | 4 | 1466 | 18.0 km / low / 0 | 20.9 km / low / 5 | wrong |
+| n2920w8115_s1 | 3 | 786 | **23 m** / low / 1 | **33 m** / medium / 0 | correct |
+| n2920w8115_s2 | 3 | 786 | 19.2 km / low / 1 | **23 m** / high / 0 | correct |
+| n2910w8105_s1 | 4 | 338 | 10.6 km / low / 2 | 11.0 km / low / 1 | wrong |
+| n2910w8105_s2 | 7 | 1051 | **12 m** / medium / 0 | **43 m** / low / 1 | correct |
+| n2880w8125_s1 | 2 | 636 | 20.0 km / low / 4 | **37 m** / medium / 0 | correct |
+| n2880w8125_s2 | 4 | 1143 | **27 m** / low / 0 | 21.0 km / low / 5 | wrong |
+| n2880w8145_s1 | 3 | 318 | 16.9 km / low / 5 | **30 m** / medium / 5 | correct |
+| n2880w8145_s2 | 5 | 1160 | **14 m** / medium / 0 | **14 m** / high / 0 | correct |
+| n2930w8125_s1 | 5 | 679 | 22.7 km / low / 0 | 21.2 km / low / 3 | wrong |
+| n2930w8125_s2 | 4 | 445 | 15.2 km / low / 4 | 21.6 km / low / 0 | wrong |
+| n2900w8115_s1 | 4 | 340 | 6.5 km / low / 5 | **95 m** / high / 0 | correct |
+| n2900w8115_s2 | 6 | 388 | 15.9 km / low / 0 | **16 m** / medium / 1 | correct |
+| n2890w8155_s1 | 3 | 601 | **49 m** / high / 0 | **22 m** / high / 0 | correct |
+| n2890w8155_s2 | 3 | 601 | **66 m** / high / 0 | **39 m** / high / 0 | correct |
+| n2940w8115_s1 | 2 | 855 | 19.3 km / low / 0 | 360 m / high / 0 | correct |
+| n2940w8115_s2 | 3 | 675 | 18.5 km / low / 0 | **31 m** / low / 1 | correct |
+| n2930w8155_s1, _s2 | 1 | — | scenario error: no suitable pair | — | — |
 
-Summary: automatic events 1/6 within 300 m (median 13.6 km); oracle events 2/6. Earlier
-development runs of the same cases (with the cubic-spline audio artefact described in
-docs/validation.md and before the local-excursion and whole-window scoring changes) had
-scored 13 m and 16 m on ormond_s1/deland_s1 with automatic events; those numbers are
-superseded by this final-code table. Diagnosis (unchanged): in dense training traffic the
-automatically detected events are composites or fragments of several aircraft, and a
-pattern-work aircraft (a5c4d1, a P28A doing circuits all day) offers a comb of similar
-flybys that matches almost any two-event separation; even with oracle ridges two of the four
-failing cases pick that aircraft. The grades and gates (below) are meant to make such answers
-visibly untrustworthy rather than to fix them.
+| | auto events (22 answered) | oracle events (22 answered) |
+|---|---|---|
+| top-1 within 300 m / beyond 1 km | 7 (32 %) / 15 (68 %) | 12 (55 %) / 9 (41 %) |
+| top-1 median | 13.6 km | 75 m |
+| best of top-3 within 300 m | 8 (36 %) | 15 (68 %) |
+| correct flight pair at rank 1 | not scored (auto events need not map to the true pair) | 13/22 (59 %) |
+| grades high / medium / low | 2 / 2 / 18 | 7 / 4 / 11 |
+| errors of the answers graded high | 49 m, 66 m | 14, 22, 23, 39, 55, 95, 360 m |
+| confidently wrong (high and > 1 km) / medium and > 1 km | 0 / 0 | 0 / 0 |
+| correct (< 300 m) but graded low | 3 | 2 |
+| wrong (> 1 km) answers that list ≥ 1 alternative | 9/15 | 7/9 |
+| runtime median / max (8 workers, machine shared) | 577 s / 918 s | 458 s / 972 s |
+
+Reading. *Accuracy:* unchanged from the first six cases — with blind event detection in dense
+training traffic the engine answers correctly about one time in three and otherwise lands
+10–23 km away; with the true ridges traced by hand it is right in just over half the cases and
+then to tens of metres (oracle median 75 m, best-of-top-3 median 41 m), so the search is not the
+main limitation, the composite/fragmentary automatic events are. The six original cases
+reproduce to the displayed precision except `ormond_s1` oracle (25 m → 16.7 km), the documented
+near-tie. *Gates (the purpose of this re-run):* across 44 answers there is no confidently wrong
+one; all 24 answers beyond 1 km are graded low, and the 9 graded high are all within 360 m of
+the truth (the 7 oracle ones with the correct aircraft; auto-event runs do not score the pair),
+worst 360 m (`n2940w8115_s1` oracle: radius 594 m, distinct-location margin 0.52 z,
+just above the 0.5 threshold). The 16 answered cases from the nine new sites were not looked at
+while the two new rules were chosen, so for them this is a blind test. The costs: 5 correct
+answers graded low, and one wrong answer (`ormond_s2` oracle, 16.5 km) held at low by a single
+gate — `track_support` (the winning `a2f0fc` CPA sits at its track end) — while `core_matches`
+passed at 15σ from only 11 valid offsets against a chance mean of 3.75, i.e. one event matched
+well almost everywhere, and the margins passed (1.76 z / 0.64 z). Among the wrong answers
+`track_support` fails in 24/24, `core_matches` in 21/24, `margin_distinct_location` in 16/24,
+`radius` and `margin` in 10/24 each, and the remaining gates in 6 or fewer. Wrong answers list an alternative in
+16/24 cases; in the other 8 the funnel kept no distinct rival within the reported set, so a
+wrong low-graded answer is still shown alone. Earlier development runs (cubic-spline audio
+artefact, before local-excursion and whole-window scoring) had scored 13 m and 16 m on
+ormond_s1/deland_s1 with automatic events; they are superseded by this table.
 
 ### Performance (observed on the real-trajectory runs, 6 workers, machine shared)
 
@@ -462,8 +510,9 @@ was a near-tie (true pair 4.176 vs a circuit-flying trainer pair 4.168, 0.008 z)
 the same two hypotheses scored 4.272 vs 4.320 and the order flipped (fine/refinement scores
 vary at the 0.1 z level between runs with different worker counts). The new output says so:
 grade low, five alternatives listed with the true pair 0.05 z behind. The 2026-11-03 "oracle
-2/6" therefore reads as "1 clear + 1 coin-flip"; the widened dense-traffic benchmark below
-replaces that table.
+2/6" therefore reads as "1 clear + 1 coin-flip"; the widened 12-site dense-traffic benchmark
+in §M7 above replaces that table (its gate details predate the printed offset band, behaviour
+identical).
 
 ### Final test summary (observed, final code)
 

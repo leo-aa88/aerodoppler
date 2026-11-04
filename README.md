@@ -137,8 +137,11 @@ details and the known degeneracies.
   Measures the inverse engine, not real-world accuracy (`IMPLEMENTATION_REPORT.md` §M7; raw JSON
   in `docs/synthetic_benchmark_2026-11-04.json`).
 * **Semi-synthetic benchmark** on real ADSB.lol trajectories (central Florida, 2026-11-02,
-  ~1,250 real segments as distractors, real USGS 3DEP terrain, simulated audio): see
-  `IMPLEMENTATION_REPORT.md` §M7 for the per-case table including the failures.
+  ~1,250 real segments as distractors, real USGS 3DEP terrain, simulated audio; 12 sites × 2
+  seeds, 22 answered): with blind event detection 7/22 top-1 within 300 m (median 13.6 km); with
+  the true flights' ridges traced as events 12/22 (median 75 m). None of the 9 answers graded
+  high was wrong (worst 360 m) and none of the 24 wrong answers was graded above low. Per-case
+  table in `IMPLEMENTATION_REPORT.md` §M7; raw JSON in `docs/real_trajectory_benchmark_2026-11-04.json`.
 * **Real recordings** (Pathak Livermore set, Zenodo 23424278, CC BY 4.0; 29 single-pass phone
   recordings on two days, recorder position trilaterated from the published track offsets,
   events detected blind, known-time ±2 s, 4 km offset box, full-day real traffic + 3DEP):
