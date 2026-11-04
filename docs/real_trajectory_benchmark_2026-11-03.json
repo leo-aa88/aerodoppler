@@ -1,0 +1,488 @@
+{
+  "label": "SEMI-SYNTHETIC BENCHMARK \u2014 real ADS-B trajectories + real DEM, SIMULATED audio; not real-world accuracy",
+  "dataset_id": "adsblol_2026-11-02_1e2f2f08",
+  "aerodoppler_version": "0.1.0",
+  "git_sha": "99990170587adf3d02c9ec7107380697e65a2966",
+  "summary": {
+    "n_cases": 6,
+    "n_answered": 6,
+    "n_abstained": 0,
+    "abstention_rate": 0.0,
+    "abstention_reasons": {},
+    "top1_error_m": {
+      "median": 13560.236569815337,
+      "p90": 19921.91731207303,
+      "max": 21877.433826768058,
+      "values": [
+        7621.3,
+        21877.4,
+        12073.6,
+        15.0,
+        15046.9,
+        17966.4
+      ]
+    },
+    "top3_min_error_m": {
+      "median": 12724.894452938595,
+      "p90": 18753.447550774727
+    },
+    "success_rate_top1_within_300m": 0.16666666666666666,
+    "success_rate_top3_within_300m": 0.16666666666666666,
+    "false_match_rate_top1_over_1km": 0.8333333333333334,
+    "flights_correct_rate": null,
+    "runtime_s": {
+      "median": 466.1408084630966,
+      "max": 495.35338973999023
+    },
+    "calibration_note": "scores are relative, uncalibrated fit values; no confidence intervals are claimed"
+  },
+  "summary_oracle_events": {
+    "n_cases": 6,
+    "n_answered": 6,
+    "n_abstained": 0,
+    "abstention_rate": 0.0,
+    "abstention_reasons": {},
+    "top1_error_m": {
+      "median": 16297.170777332132,
+      "p90": 21083.403808305367,
+      "max": 21228.803972532627,
+      "values": [
+        25.4,
+        16486.3,
+        55.0,
+        16108.0,
+        21228.8,
+        20938.0
+      ]
+    },
+    "top3_min_error_m": {
+      "median": 122.2112096698327,
+      "p90": 16834.618943992693
+    },
+    "success_rate_top1_within_300m": 0.3333333333333333,
+    "success_rate_top3_within_300m": 0.6666666666666666,
+    "false_match_rate_top1_over_1km": 0.6666666666666666,
+    "flights_correct_rate": 0.3333333333333333,
+    "runtime_s": {
+      "median": 389.11201882362366,
+      "max": 486.4605219364166
+    },
+    "calibration_note": "scores are relative, uncalibrated fit values; no confidence intervals are claimed"
+  },
+  "cases": [
+    {
+      "case": "ormond_s1",
+      "observer": [
+        29.1,
+        -81.15
+      ],
+      "n_events_detected": 24,
+      "chosen_pair": [
+        [
+          "abfa81",
+          null,
+          2528,
+          63.4
+        ],
+        [
+          "ab87bb",
+          "C172",
+          1749,
+          63.7
+        ]
+      ],
+      "audible_flights": 5,
+      "event_separation_s": 754.723236322403,
+      "recording_id": "rec_91c58ec7bdf7",
+      "mode_a": {
+        "case_id": "ormond_s1",
+        "abstained": false,
+        "abstention_reason": null,
+        "top1_error_m": 7621.287082953551,
+        "topk_min_error_m": 7011.883508760707,
+        "top1_flights_correct": null,
+        "top1_score": 5.1657981158442725,
+        "runner_up_gap_z": 0.0317877155921753,
+        "runtime_s": 447.41756081581116,
+        "n_candidates": 5,
+        "notes": {
+          "run_id": "run_3c166268e569",
+          "top1_flights": [
+            "a2f0fc",
+            "a2f0fc"
+          ],
+          "chosen_pair_icaos": [
+            "ab87bb",
+            "abfa81"
+          ],
+          "top1_uses_a_chosen_flight": false
+        }
+      },
+      "mode_a_oracle_events": {
+        "case_id": "ormond_s1_oracle",
+        "abstained": false,
+        "abstention_reason": null,
+        "top1_error_m": 25.401151900596282,
+        "topk_min_error_m": 25.401151900596282,
+        "top1_flights_correct": true,
+        "top1_score": 4.175823710025673,
+        "runner_up_gap_z": 0.007922265033155185,
+        "runtime_s": 378.1806995868683,
+        "n_candidates": 5,
+        "notes": {
+          "run_id": "run_c3cd68c95ea4",
+          "top1_flights": [
+            "abfa81",
+            "ab87bb"
+          ],
+          "events": "oracle (true ridges traced as manual events)"
+        }
+      }
+    },
+    {
+      "case": "ormond_s2",
+      "observer": [
+        29.1,
+        -81.15
+      ],
+      "n_events_detected": 38,
+      "chosen_pair": [
+        [
+          "ab402b",
+          "C172",
+          2216,
+          62.0
+        ],
+        [
+          "ac25b7",
+          null,
+          2382,
+          65.8
+        ]
+      ],
+      "audible_flights": 7,
+      "event_separation_s": 1442.757461309433,
+      "recording_id": "rec_b90d125ef9c5",
+      "mode_a": {
+        "case_id": "ormond_s2",
+        "abstained": false,
+        "abstention_reason": null,
+        "top1_error_m": 21877.433826768058,
+        "topk_min_error_m": 19540.494304171447,
+        "top1_flights_correct": null,
+        "top1_score": 3.532065458593592,
+        "runner_up_gap_z": 0.4063453153917669,
+        "runtime_s": 374.2296016216278,
+        "n_candidates": 4,
+        "notes": {
+          "run_id": "run_6576674ec642",
+          "top1_flights": [
+            "a5c4d1",
+            "~292c76"
+          ],
+          "chosen_pair_icaos": [
+            "ab402b",
+            "ac25b7"
+          ],
+          "top1_uses_a_chosen_flight": false
+        }
+      },
+      "mode_a_oracle_events": {
+        "case_id": "ormond_s2_oracle",
+        "abstained": false,
+        "abstention_reason": null,
+        "top1_error_m": 16486.296545175777,
+        "topk_min_error_m": 13509.55067081697,
+        "top1_flights_correct": false,
+        "top1_score": 4.832300648740809,
+        "runner_up_gap_z": 0.640545696145816,
+        "runtime_s": 416.29255390167236,
+        "n_candidates": 5,
+        "notes": {
+          "run_id": "run_d3aefcf8c1f4",
+          "top1_flights": [
+            "a2f0fc",
+            "a59a0f"
+          ],
+          "events": "oracle (true ridges traced as manual events)"
+        }
+      }
+    },
+    {
+      "case": "deland_s1",
+      "observer": [
+        29.03,
+        -81.25
+      ],
+      "n_events_detected": 6,
+      "chosen_pair": [
+        [
+          "ab6f18",
+          "C172",
+          1848,
+          59.3
+        ],
+        [
+          "a208f2",
+          "C172",
+          1739,
+          59.3
+        ]
+      ],
+      "audible_flights": 3,
+      "event_separation_s": 1052.9848158359528,
+      "recording_id": "rec_af4b5914a9dc",
+      "mode_a": {
+        "case_id": "deland_s1",
+        "abstained": false,
+        "abstention_reason": null,
+        "top1_error_m": 12073.593489013378,
+        "topk_min_error_m": 10402.909255259894,
+        "top1_flights_correct": null,
+        "top1_score": 4.520726365017626,
+        "runner_up_gap_z": 0.1218978647398794,
+        "runtime_s": 458.0798282623291,
+        "n_candidates": 5,
+        "notes": {
+          "run_id": "run_10705907d4a8",
+          "top1_flights": [
+            "~292c23",
+            "a5c4d1"
+          ],
+          "chosen_pair_icaos": [
+            "a208f2",
+            "ab6f18"
+          ],
+          "top1_uses_a_chosen_flight": false
+        }
+      },
+      "mode_a_oracle_events": {
+        "case_id": "deland_s1_oracle",
+        "abstained": false,
+        "abstention_reason": null,
+        "top1_error_m": 55.00500098322556,
+        "topk_min_error_m": 55.00500098322556,
+        "top1_flights_correct": true,
+        "top1_score": 5.217037594890906,
+        "runner_up_gap_z": 1.4990411399198922,
+        "runtime_s": 379.8282971382141,
+        "n_candidates": 5,
+        "notes": {
+          "run_id": "run_18ce6befecaf",
+          "top1_flights": [
+            "ab6f18",
+            "a208f2"
+          ],
+          "events": "oracle (true ridges traced as manual events)"
+        }
+      }
+    },
+    {
+      "case": "deland_s2",
+      "observer": [
+        29.03,
+        -81.25
+      ],
+      "n_events_detected": 19,
+      "chosen_pair": [
+        [
+          "acc020",
+          "C172",
+          2771,
+          49.3
+        ],
+        [
+          "a2f0fc",
+          "SR22",
+          2339,
+          85.6
+        ]
+      ],
+      "audible_flights": 6,
+      "event_separation_s": 1168.367369890213,
+      "recording_id": "rec_369357787505",
+      "mode_a": {
+        "case_id": "deland_s2",
+        "abstained": false,
+        "abstention_reason": null,
+        "top1_error_m": 15.017552745973674,
+        "topk_min_error_m": 15.017552745973674,
+        "top1_flights_correct": null,
+        "top1_score": 3.489127815905058,
+        "runner_up_gap_z": 0.1550409183840702,
+        "runtime_s": 495.35338973999023,
+        "n_candidates": 5,
+        "notes": {
+          "run_id": "run_40f37895aebb",
+          "top1_flights": [
+            "a40f39",
+            "a2f0fc"
+          ],
+          "chosen_pair_icaos": [
+            "a2f0fc",
+            "acc020"
+          ],
+          "top1_uses_a_chosen_flight": true
+        }
+      },
+      "mode_a_oracle_events": {
+        "case_id": "deland_s2_oracle",
+        "abstained": false,
+        "abstention_reason": null,
+        "top1_error_m": 16108.045009488489,
+        "topk_min_error_m": 189.41741835643984,
+        "top1_flights_correct": false,
+        "top1_score": 2.5328411455066573,
+        "runner_up_gap_z": 0.12229027100908363,
+        "runtime_s": 486.4605219364166,
+        "n_candidates": 4,
+        "notes": {
+          "run_id": "run_1c8636c51922",
+          "top1_flights": [
+            "a593ff",
+            "a2f0fc"
+          ],
+          "events": "oracle (true ridges traced as manual events)"
+        }
+      }
+    },
+    {
+      "case": "daytona_w_s1",
+      "observer": [
+        29.17,
+        -81.1
+      ],
+      "n_events_detected": 17,
+      "chosen_pair": [
+        [
+          "abfa81",
+          null,
+          640,
+          43.0
+        ],
+        [
+          "a1e173",
+          "C172",
+          2313,
+          38.5
+        ]
+      ],
+      "audible_flights": 6,
+      "event_separation_s": 546.9247980117798,
+      "recording_id": "rec_07697a19c4a6",
+      "mode_a": {
+        "case_id": "daytona_w_s1",
+        "abstained": false,
+        "abstention_reason": null,
+        "top1_error_m": 15046.879650617298,
+        "topk_min_error_m": 15046.879650617298,
+        "top1_flights_correct": null,
+        "top1_score": 1.6808156885739782,
+        "runner_up_gap_z": 0.601344546958378,
+        "runtime_s": 489.84051036834717,
+        "n_candidates": 5,
+        "notes": {
+          "run_id": "run_6af7b141a3fa",
+          "top1_flights": [
+            "a2f0fc",
+            "a30957"
+          ],
+          "chosen_pair_icaos": [
+            "a1e173",
+            "abfa81"
+          ],
+          "top1_uses_a_chosen_flight": false
+        }
+      },
+      "mode_a_oracle_events": {
+        "case_id": "daytona_w_s1_oracle",
+        "abstained": false,
+        "abstention_reason": null,
+        "top1_error_m": 21228.803972532627,
+        "topk_min_error_m": 37.563836068478956,
+        "top1_flights_correct": false,
+        "top1_score": 4.095814575473131,
+        "runner_up_gap_z": 0.08626735921699868,
+        "runtime_s": 398.3957405090332,
+        "n_candidates": 5,
+        "notes": {
+          "run_id": "run_c15c489088da",
+          "top1_flights": [
+            "a5c4d1",
+            "a5c4d1"
+          ],
+          "events": "oracle (true ridges traced as manual events)"
+        }
+      }
+    },
+    {
+      "case": "daytona_w_s2",
+      "observer": [
+        29.17,
+        -81.1
+      ],
+      "n_events_detected": 7,
+      "chosen_pair": [
+        [
+          "abba5f",
+          "C172",
+          667,
+          45.7
+        ],
+        [
+          "a30957",
+          "C172",
+          665,
+          37.3
+        ]
+      ],
+      "audible_flights": 4,
+      "event_separation_s": 1465.8988327980042,
+      "recording_id": "rec_5c125a998a93",
+      "mode_a": {
+        "case_id": "daytona_w_s2",
+        "abstained": false,
+        "abstention_reason": null,
+        "top1_error_m": 17966.400797378003,
+        "topk_min_error_m": 17966.400797378003,
+        "top1_flights_correct": null,
+        "top1_score": 6.407547773546696,
+        "runner_up_gap_z": 1.322158668035005,
+        "runtime_s": 474.20178866386414,
+        "n_candidates": 4,
+        "notes": {
+          "run_id": "run_396cfe32fd76",
+          "top1_flights": [
+            "a5c4d1",
+            "a5c4d1"
+          ],
+          "chosen_pair_icaos": [
+            "a30957",
+            "abba5f"
+          ],
+          "top1_uses_a_chosen_flight": false
+        }
+      },
+      "mode_a_oracle_events": {
+        "case_id": "daytona_w_s2_oracle",
+        "abstained": false,
+        "abstention_reason": null,
+        "top1_error_m": 20938.003644078108,
+        "topk_min_error_m": 20159.687217168415,
+        "top1_flights_correct": false,
+        "top1_score": 4.861123475377552,
+        "runner_up_gap_z": 0.0009864563170065566,
+        "runtime_s": 304.87850761413574,
+        "n_candidates": 4,
+        "notes": {
+          "run_id": "run_1c03792a855a",
+          "top1_flights": [
+            "a5c4d1",
+            "a5c4d1"
+          ],
+          "events": "oracle (true ridges traced as manual events)"
+        }
+      }
+    }
+  ]
+}

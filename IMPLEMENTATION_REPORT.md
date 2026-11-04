@@ -389,9 +389,9 @@ from the ~100 m aspiration; they are reproducible from `docs/livermore_benchmark
 
 ```
 $ AERODOPPLER_OFFLINE=true uv run pytest -q -m "not network" --durations=8
-56 passed, 1 deselected, 1 warning in 518.51s (0:08:38)
+56 passed, 1 deselected, 1 warning in 551.10s (0:09:11)
 ```
-(run while a 8-worker benchmark was using the machine). 36 unit, 13 integration/e2e-API/CLI
+(run while a benchmark and the demo were using the machine). 36 unit, 13 integration/e2e-API/CLI
 and 7 slow synthetic end-to-end tests. Lint: `uv run ruff check src tests` → All checks passed;
 `ruff format --check` → formatted. The network-marked test (3DEP + Copernicus online fetch)
 passed when run with network access (`uv run pytest -m network` → 1 passed, 22.5 s).
