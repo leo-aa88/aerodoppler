@@ -127,6 +127,8 @@ known degeneracies.
   correct aircraft 83 %; over all 29 incl. abstained candidates top-1 median 466 m, 55 % within
   500 m, 38 % beyond 1 km (mostly the mirror solution of a single pass). Details and the per-case
   table in `IMPLEMENTATION_REPORT.md` §M7; raw JSON in `docs/livermore_benchmark_2026-11-03.json`.
+  The nine-gate confidence grade marks most mirror solutions low but still grades one 3.4 km
+  answer high, so grades are a warning system, not a guarantee.
   `aerodoppler benchmark --manifest cases.json` runs the same protocol on your own consented
   recordings. Every score remains labelled uncalibrated.
 

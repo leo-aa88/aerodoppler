@@ -337,15 +337,19 @@ terrain. Runtime ≈ 13 s per case (4 workers).
 | answered — correct aircraft at rank 1 | 83 % (15/18) |
 | all 29 incl. abstained candidates — top-1 median / within 500 m / > 1 km | 466 m / 55 % / 38 % |
 | all 29 — correct aircraft at rank 1 | 83 % (24/29) |
-| confidence grades (answered) | high 7 (median 315 m, max 3.4 km), medium 9 (median 499 m), low 2 (median 3.4 km) |
+| confidence grades (answered, final 9-gate version) | high 5 (median 315 m, 40 % ≤ 300 m, 20 % > 1 km, max 3.4 km), medium 1 (3.1 km), low 12 (median 364 m, 42 % > 1 km) |
+| gates failing among the 18 answered | margin_distinct_location 12, radius 9, margin (different flights) 4, core_matches 1, track_support 1 |
 
 Reading: a single straight pass with a ±2 s clock pins the aircraft well (83 % right) but
 leaves the mirror ambiguity across the track and an along-track slack, which is why "best of
 top-3" (179 m) is much better than top-1 (391 m) and why most errors > 1 km are the mirror
-solution. The **grades do not yet separate good from bad answers on single-pass real
-recordings**: the margin gate only considers rivals that use *different flights*, so a mirror
-solution with the same flight passes it; a same-flight, distinct-location margin is the obvious
-next gate. The abstention threshold (`min_score_z` = 1.2, tuned on synthetic audio) is
+solution. The grades only partly separate good from bad answers on single-pass real
+recordings: before the distinct-location margin gate the "high" group contained 7 cases with
+29 % beyond 1 km; with it (final version) "high" contains 5 cases with 20 % beyond 1 km and the
+mirror cases mostly drop to low — but one 3.4 km mirror solution is still graded high, so
+"high" must not be read as "within a few hundred metres" on one-pass recordings. The three
+self-distrust gates added after DOPPLERGEIST (track support, search completeness, sensitivity)
+all passed on these cases and therefore did not change their grades. The abstention threshold (`min_score_z` = 1.2, tuned on synthetic audio) is
 conservative for noisy phone audio: 5 of the 11 abstained cases had a top-1 within 300 m.
 For comparison, dopplerprint reports 34/40 correct aircraft and a 207 m median with the pass
 position supplied; our numbers are with blind event detection and an offset box, so they are
@@ -436,9 +440,10 @@ passed when run with network access (`uv run pytest -m network` → 1 passed, 22
 7. **OpenSky provider** not implemented (needs approved access); provider interface exists.
 8. **Aircraft type classification** is a heuristic table; unknown types are never excluded.
 9. The UI has no authentication and must stay on localhost; SSE progress is a 1 s poll.
-10. The confidence grade is a rule-based verdict whose thresholds (2σ, ±4 s, 0.5 z, 1 km) were
-    set by judgement on synthetic data and the Livermore set, not calibrated against outcomes;
-    "high" has not been shown to imply a bounded error on real recordings.
+10. The confidence grade is a rule-based verdict whose thresholds (2σ, ±4 s, 0.5 z, 1 km,
+    ±150 m / ±5 m/s) were set by judgement on synthetic data and the Livermore set, not
+    calibrated against outcomes; on the Livermore single-pass clips "high" still contains a
+    3.4 km mirror solution (5 cases: 40 % within 300 m, 20 % beyond 1 km).
 
 ## Next executable actions
 
