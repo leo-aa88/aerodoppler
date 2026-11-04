@@ -1,0 +1,53 @@
+# Dependabot version updates. Security updates are enabled separately in the repository's
+# Settings → Code security ("Dependabot security updates").
+version: 2
+updates:
+  # Python dependencies (pyproject.toml + uv.lock)
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "python"]
+    commit-message:
+      prefix: "deps(python)"
+    groups:
+      python-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Web frontend (web/package.json + package-lock.json)
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "javascript"]
+    commit-message:
+      prefix: "deps(web)"
+    groups:
+      web-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # GitHub Actions used in .github/workflows/
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "deps(ci)"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Base images in the Dockerfile
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels: ["dependencies", "docker"]
+    commit-message:
+      prefix: "deps(docker)"
