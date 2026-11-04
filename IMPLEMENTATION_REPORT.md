@@ -260,6 +260,8 @@ separation 1100 s 37 m (0.42, previously a 15 km false match before slope weight
 straight second flight 7 m (1.44), ADS-B gap 46 m (1.85), 8 distractors 37 m (1.48),
 heading mix 7 m (1.73), RPM drift 35 m (1.07). Errors are bounded by the 25 m final grid plus
 the 200 m coarse phase; `nominal_grid_spacing_m` reports the actual resolution.
+Re-run on 2026-11-04 with the ten-gate version (`docs/synthetic_benchmark_2026-11-04.json`):
+accuracy unchanged, grades 9 high / 3 medium; details in the reliability pass below.
 
 ### M7 results — semi-synthetic benchmark on REAL trajectories (observed, final code)
 
@@ -434,8 +436,25 @@ the rule), everything else unchanged. Caveats, stated plainly: both rules were c
 looking at these 18 answered cases, so the table is not a blind test of them; and on 60–180 s
 clips the valid offsets form a narrow band, so the reported σ values (5–76) are a threshold
 test, not a significance level — the band is now printed next to them. The gate thresholds
-themselves are unchanged. Synthetic benchmark re-run with the new gates: see below (pending
-at the time of writing; the first cases reproduce the documented errors exactly).
+themselves are unchanged.
+
+Synthetic benchmark re-run with the ten gates (`data/runs/benchmark_synthetic_gates`, 5
+workers, machine shared with the dense-traffic benchmark; raw JSON in
+`docs/synthetic_benchmark_2026-11-04.json`; SYNTHETIC audio and flights): accuracy unchanged.
+Mode A 12/12 answered, top-1 median 31.2 m / p90 45.0 m / max 53.0 m (2026-11-03: 33.1 / 45.0 /
+53.0 m), eleven per-case errors identical to the metre and `drifting_rpm` 35.0 → 19.6 m; Mode B
+12/12, median 7.3 m, p90 21.4 m (was 31.2 m), max 69.9 m, three cases moved by one or two grid
+steps. Grades (Mode A): **high 9, medium 3, low 0**. The in-recording null is a real sample on
+these 1,500–1,700 s recordings (16–48 valid offsets of 136–997 s per event; per-event
+significances 4.4–311σ); `event_shape` and `core_matches` demoted nothing. The three mediums:
+`lowsnr_4` and `verylow_0` fail `no_unheard_close_pass` (silence penalty 0.07 z and 0.70 z: a
+distractor passes close while the detector, at 4 and 0 dB SNR, found no ridge for it);
+`long_sep_1100` misses `margin` and `margin_distinct_location` by a hair (gap 0.498 z, high
+needs 0.5) and lists one alternative 15.5 km away (the pair `ad0001`+`ad0100`, the same
+hypothesis that was a 15 km false match before slope weighting). The 2026-11-03 run did not
+persist per-case grades (result files then lacked the `gates` field), so there is no
+before/after grade table for the synthetic set. Runtime median 289 s / max 442 s (was 162 /
+300 s; the 8-worker dense-traffic benchmark was running alongside).
 
 Dense-traffic reproducibility note: re-running the documented `ormond_s1` oracle-events case
 (same seed, same scenario, same chosen pair) gave 16.7 km instead of 25 m. The documented win

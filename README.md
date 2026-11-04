@@ -132,9 +132,10 @@ details and the known degeneracies.
 ## Benchmarks (honest summary)
 
 * **Synthetic benchmark** (12 scenarios, simulated audio and flights, limited geometric
-  diversity): Mode A (unknown time) top-1 error median 33 m, p90 45 m, max 53 m, 12/12 correct
-  flight pairs, no false matches; Mode B (known time ±10 s) median 7 m. Measures the inverse
-  engine, not real-world accuracy (`IMPLEMENTATION_REPORT.md` §M7).
+  diversity): Mode A (unknown time) top-1 error median 31 m, p90 45 m, max 53 m, 12/12 correct
+  flight pairs, no false matches, grades 9 high / 3 medium; Mode B (known time ±10 s) median 7 m.
+  Measures the inverse engine, not real-world accuracy (`IMPLEMENTATION_REPORT.md` §M7; raw JSON
+  in `docs/synthetic_benchmark_2026-11-04.json`).
 * **Semi-synthetic benchmark** on real ADSB.lol trajectories (central Florida, 2026-11-02,
   ~1,250 real segments as distractors, real USGS 3DEP terrain, simulated audio): see
   `IMPLEMENTATION_REPORT.md` §M7 for the per-case table including the failures.
