@@ -306,6 +306,7 @@ def run_real_trajectory_benchmark(
     log=print,
     max_assignments: int = 200_000,
     events_k: int = 2,
+    oracle_events: bool = False,
 ) -> dict[str, Any]:
     """Semi-synthetic benchmark: simulated audio of REAL ADS-B trajectories at known observer
     positions, searched against all real traffic of the day with the real DEM."""
@@ -321,6 +322,7 @@ def run_real_trajectory_benchmark(
     store = Store(settings.db_path)
     ds = FlightDataset(dataset_id, settings.normalized_dir / dataset_id)
     outcomes: list[CaseOutcome] = []
+    oracle_outcomes: list[CaseOutcome] = []
     rows: list[dict[str, Any]] = []
     for name, lat, lon in observers:
         for seed in seeds:
@@ -429,6 +431,76 @@ def run_real_trajectory_benchmark(
                 )
             outcomes.append(oc)
             row["mode_a"] = asdict(oc)
+            if oracle_events and truth.get("oracle_ridges"):
+                # operator-style manual events from the true ridges (fundamental); separates
+                # detector failures from search failures
+                man = []
+                for rg in truth["oracle_ridges"].values():
+                    pts = list(zip(rg["t_rel_s"], rg["f_hz"], strict=True))
+                    if len(pts) >= 3:
+                        man.append(
+                            add_manual_event(
+                                store,
+                                rec.id,
+                                pts,
+                                harmonic=1,
+                                uncertainty_hz=0.5,
+                                annotated_by="oracle-truth-ridge",
+                            )
+                        )
+                man.sort(key=lambda e: e.audio_start_s)
+                if len(man) == 2:
+                    t = time.time()
+                    req = SearchRequest(
+                        mode=SearchMode.UNKNOWN_TIME,
+                        recording_id=rec.id,
+                        event_ids=[e.id for e in man],
+                        date_utc=truth["date_utc"],
+                        bbox=local_bbox,
+                        flight_dataset_ids=[dataset_id],
+                        operator_authorized=True,
+                        quality_settings=QualitySettings(
+                            workers=workers, max_assignments=max_assignments
+                        ),
+                        seed=seed,
+                    )
+                    try:
+                        res = run_search_inline(store, settings, req)
+                        oco = evaluate_case(
+                            cname + "_oracle",
+                            res,
+                            lat,
+                            lon,
+                            {p["icao24"] for p in truth["chosen_pair"]},
+                            time.time() - t,
+                        )
+                        oco.notes = {
+                            "run_id": res.run_id,
+                            "top1_flights": [
+                                s["icao24"] for s in res.candidates[0].extra["segments"]
+                            ]
+                            if res.candidates
+                            else None,
+                            "events": "oracle (true ridges traced as manual events)",
+                        }
+                    except Exception as e:
+                        oco = CaseOutcome(
+                            cname + "_oracle",
+                            True,
+                            f"error: {type(e).__name__}: {e}",
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            time.time() - t,
+                            0,
+                        )
+                    log(
+                        f"[realtraj] {cname} ORACLE events: abstained={oco.abstained} ({oco.abstention_reason}) top1 err={oco.top1_error_m} m, flights ok={oco.top1_flights_correct}, {oco.runtime_s:.0f}s"
+                    )
+                    oracle_outcomes.append(oco)
+                    row["mode_a_oracle_events"] = asdict(oco)
             rows.append(row)
     report = {
         "label": "SEMI-SYNTHETIC BENCHMARK — real ADS-B trajectories + real DEM, SIMULATED audio; not real-world accuracy",
@@ -436,6 +508,7 @@ def run_real_trajectory_benchmark(
         "aerodoppler_version": __version__,
         "git_sha": git_sha(),
         "summary": summarize(outcomes),
+        "summary_oracle_events": summarize(oracle_outcomes) if oracle_outcomes else None,
         "cases": rows,
     }
     (out_dir / "real_trajectory_benchmark.json").write_text(

@@ -691,6 +691,11 @@ def benchmark(
     ),
     seeds: str = typer.Option("1", "--seeds"),
     snr_db: float = typer.Option(10.0, "--snr-db"),
+    oracle_events: bool = typer.Option(
+        False,
+        "--oracle-events",
+        help="--real-trajectories: also run with manual events traced from the TRUE ridges (detector-vs-search diagnostic)",
+    ),
     events_k: int = typer.Option(
         2,
         "--events-k",
@@ -729,6 +734,7 @@ def benchmark(
             log=echo,
             max_assignments=max_assignments,
             events_k=events_k,
+            oracle_events=oracle_events,
         )
     elif manifest is not None:
         rep = run_manifest_benchmark(s, manifest, out, workers=workers, log=echo)

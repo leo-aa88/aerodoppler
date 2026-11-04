@@ -61,10 +61,26 @@ def _spline_path(traj, lam: float = 100.0):
     pos = traj.pos[keep]
     sp = [make_smoothing_spline(t, pos[:, k], lam=lam) for k in range(3)]
 
-    class _CS:  # minimal callable with the same interface as CubicSpline for the path
+    t_lo, t_hi = float(t[0]), float(t[-1])
+    p_lo = np.array([s(t_lo) for s in sp])
+    p_hi = np.array([s(t_hi) for s in sp])
+    v_lo = np.array([s(t_lo, 1) for s in sp])
+    v_hi = np.array([s(t_hi, 1) for s in sp])
+
+    class _CS:  # callable path; linear continuation outside the sampled interval (a smoothing
+        # spline extrapolates as a cubic polynomial and diverges, which breaks the retarded-time
+        # solver for flights that start/end inside the recording window)
         def __call__(self, x):
             x = np.asarray(x, dtype=np.float64)
-            return np.stack([s(x) for s in sp], axis=1)
+            xc = np.clip(x, t_lo, t_hi)
+            out = np.stack([s(xc) for s in sp], axis=1)
+            lo = x < t_lo
+            hi = x > t_hi
+            if lo.any():
+                out[lo] = p_lo + (x[lo] - t_lo)[:, None] * v_lo
+            if hi.any():
+                out[hi] = p_hi + (x[hi] - t_hi)[:, None] * v_hi
+            return out
 
     cs = _CS()
 
@@ -143,6 +159,7 @@ def build_real_trajectory_scenario(
     frame = LocalFrame(case.observer_lat, case.observer_lon, obs_hae)
     flights: list[SyntheticFlight] = []
     truth_flights = []
+    oracle_ridges: dict[str, dict[str, list[float]]] = {}
     for p in passes:
         if p["tau"] < t_rec0 - 300 or p["tau"] > t_rec0 + duration + 300:
             continue
@@ -170,6 +187,29 @@ def build_real_trajectory_scenario(
             )
         )
         truth_flights.append({**p, "f0_hz": f0, "chosen": p in (a, b)})
+        if p in (a, b):
+            # oracle ridge (fundamental) as an operator would trace it: received frequency of
+            # the smooth path at the true observer, ±150 s around the delayed CPA
+            from aerodoppler.physics.doppler import predict
+            from aerodoppler.physics.trajectory import Trajectory as _Traj
+
+            tt = np.arange(
+                max(traj.t_start, p["tau"] - 200.0), min(traj.t_end, p["tau"] + 200.0), 0.5
+            )
+            dense = _Traj.from_ecef(tt, flights[-1].path_ecef(tt), max_gap_s=5.0, smooth=1)
+            pr = predict(
+                dense,
+                geodetic_to_ecef(case.observer_lat, case.observer_lon, obs_hae).reshape(3),
+                c,
+                dt_s=0.5,
+            )
+            f_rx = flights[-1].f0(pr.t_emit) * pr.factor
+            t_rel = pr.t_receive - t_rec0
+            m = (np.abs(pr.t_receive - p["tau"]) <= 150.0) & (t_rel >= 0) & (t_rel <= duration)
+            oracle_ridges[p["icao24"]] = {
+                "t_rel_s": np.round(t_rel[m][::4], 3).tolist(),
+                "f_hz": np.round(f_rx[m][::4], 3).tolist(),
+            }
     scene = SyntheticScene(
         case.observer_lat, case.observer_lon, obs_hae, frame, flights, t_rec0, duration, case.fs, c
     )
@@ -191,6 +231,7 @@ def build_real_trajectory_scenario(
             "ground_elevation_m": ground,
             "observer_hae_m": obs_hae,
             "chosen_pair": [a, b],
+            "oracle_ridges": oracle_ridges,
             "audible_flights": truth_flights,
             "event_separation_s": b["tau"] - a["tau"],
             "wav_path": str(wav),
