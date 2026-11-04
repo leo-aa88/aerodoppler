@@ -439,6 +439,9 @@ Network-marked test (3DEP + Copernicus online fetch) passes when run with networ
 7. **OpenSky provider** not implemented (needs approved access); provider interface exists.
 8. **Aircraft type classification** is a heuristic table; unknown types are never excluded.
 9. The UI has no authentication and must stay on localhost; SSE progress is a 1 s poll.
+10. The confidence grade is a rule-based verdict whose thresholds (2σ, ±4 s, 0.5 z, 1 km) were
+    set by judgement on synthetic data and the Livermore set, not calibrated against outcomes;
+    "high" has not been shown to imply a bounded error on real recordings.
 
 ## Next executable actions
 
@@ -489,7 +492,25 @@ code copied):
 4. **Extra flyovers locked to one clock** (both): implemented as multi-event Mode A
    (`attach_extra_events`), kept opt-in because it regressed a dense-traffic case.
 
-Ideas noted but not implemented: ICAO Doc 8643 engine classes (OpenSky mirror) or tar1090-db
+5. **Graded confidence gates** (Dicklesworthstone/franken_doppler_finder, reviewed at the
+   user's request): five gates — events beat a chance-match null (the same predicted curves at
+   48 random clock offsets in the same recording) by ≥ 2σ with coverage ≥ 40 %; every event's own
+   best clock within ±4 s of the shared clock; margin ≥ 0.5 z over the best rival that uses
+   *different flights*; no penalised unheard close pass; landscape radius ≤ 1 km → high /
+   medium / low (`search/rank.py::gate_results`, shown in `result.json`, CLI and UI). On the
+   synthetic demo the verdict is **high** (events 20σ and 6σ above chance, margin 3.2 z, radius
+   79 m). Also from fdop: the template detector now requires both halves of a pass to carry
+   evidence (rejects hum, clicks and one-sided plateau pieces), and the silence term weighs an
+   unheard aircraft by how much closer it passed than the heard ones. fdop's spatio-temporal
+   hash join is conceptually what the Δt pairing here does on (grid point, time bucket) keys;
+   its emission-time physics and ADS-B cleanup were already present. fdop's own reported
+   results (224 m at the reference site, mixed/frequently wrong elsewhere) match our
+   experience that dense or sparse real traffic, not the physics, decides success.
+
+Ideas noted but not implemented: fdop's per-(event, flight) locus hypotheses instead of a ground
+grid (an optimisation), profile-likelihood ranges on fitted curve parameters, evidence in nats
+against a calibrated null for ranking (ours uses the null only in the gates), weather-adjusted
+sound speed/wind; ICAO Doc 8643 engine classes (OpenSky mirror) or tar1090-db
 instead of the heuristic type table; Open-Meteo weather for speed of sound and uniform wind;
 log-frequency spectrogram; per-flight-pair margin reporting; AWS Terrarium terrain tiles as a
 third DEM source; a contrastive (spectral-neighbourhood) score, which dopplertrack found did

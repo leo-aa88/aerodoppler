@@ -105,8 +105,11 @@ piecewise-linear trajectories; delayed CPA timing; candidate ground grid (200 m)
 Mode A pairs flights whose delayed-CPA difference equals the observed event separation, Mode B
 matches the known clock; curves are scored on a whitened spectrogram with harmonics, an RPM-drift
 nuisance and **one shared clock origin** (event 2 is never slid independently); soft silence
-term; 100 m → 25 m refinement; abstention when evidence is insufficient. `docs/theory.md` has the
-details and the known degeneracies.
+term; 100 m → 25 m refinement; abstention when evidence is insufficient; and a graded
+**confidence verdict** (high / medium / low) from five gates: evidence above a chance-match null
+drawn from the recording itself, clock lock across events, margin over the best different-flight
+rival, no unheard close pass, bounded landscape radius. `docs/theory.md` has the details and the
+known degeneracies.
 
 ## Benchmarks (honest summary)
 
