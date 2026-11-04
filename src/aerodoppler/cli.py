@@ -52,8 +52,25 @@ def _setup_logging(verbose: bool) -> None:
     )
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        from aerodoppler import __version__
+
+        typer.echo(f"aerodoppler {__version__}")
+        raise typer.Exit()
+
+
 @app.callback()
-def _main(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
+def _main(
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the version and exit.",
+    ),
+) -> None:
     _setup_logging(verbose)
     get_settings().ensure_dirs()
 

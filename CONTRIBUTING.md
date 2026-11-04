@@ -79,6 +79,25 @@ These change results, so they need evidence:
 Use a short imperative summary line ("Add distinct-location margin gate"), then a blank line and
 the why, if it is not obvious.
 
+## Releases (maintainers)
+
+Releases are cut by `.github/workflows/release.yml`; git tags are the source of truth.
+
+- **Actions → Release → Run workflow**, choose `patch`, `minor` or `major`. The workflow runs
+  lint and the full offline test suite, computes the next `vX.Y.Z` from the latest tag, and
+  pushes only the tag (it never commits to `main`).
+- Or push a tag yourself: `git tag -a v0.2.0 -m v0.2.0 && git push origin v0.2.0`.
+
+The tag is stamped into `src/aerodoppler/__init__.py` at build time. The wheel (with the web UI
+bundled) and the Docker image are smoke-tested by `scripts/smoke_release.sh` before the GitHub
+Release and the GHCR image are published. Every pull request runs the same build as a dry run.
+Test a local build with:
+
+```bash
+cp -r web/out src/aerodoppler/web_static && uv build --out-dir dist
+scripts/smoke_release.sh wheel dist/aerodoppler-*.whl "" --demo
+```
+
 ## Licence
 
 AeroDoppler is released under the [MIT License](LICENSE). By contributing, you agree that your

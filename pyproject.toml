@@ -1,6 +1,6 @@
 [project]
 name = "aerodoppler"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Consent-based research tool: aircraft-Doppler acoustic geolocation of stationary recordings using historical ADS-B trajectories."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -47,6 +47,15 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+# Single source of truth for source installs; release builds stamp it from the git tag.
+path = "src/aerodoppler/__init__.py"
+
+[tool.hatch.build]
+# The built web UI is copied here by the release workflow / Dockerfile. It is git-ignored,
+# so it must be listed as an artifact for hatch to include it.
+artifacts = ["src/aerodoppler/web_static/**"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aerodoppler"]

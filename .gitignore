@@ -16,6 +16,7 @@ __pycache__/
 build/
 dist/
 # web
+src/aerodoppler/web_static/
 web/node_modules/
 web/.next/
 web/out/

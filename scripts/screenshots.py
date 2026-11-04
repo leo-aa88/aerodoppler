@@ -36,7 +36,22 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     port = free_port()
     env = dict(os.environ, AERODOPPLER_DATA_DIR=args.data_dir, AERODOPPLER_OFFLINE="true")
-    srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "aerodoppler.api.app:create_app", "--factory", "--host", "127.0.0.1", "--port", str(port), "--log-level", "warning"], env=env)
+    srv = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "aerodoppler.api.app:create_app",
+            "--factory",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--log-level",
+            "warning",
+        ],
+        env=env,
+    )
     base = f"http://127.0.0.1:{port}"
     try:
         for _ in range(60):
@@ -49,7 +64,10 @@ def main() -> int:
         searches = json.loads(urllib.request.urlopen(base + "/api/searches").read())["searches"]
         done = [s for s in searches if s["status"] in ("succeeded", "abstained")]
         if not recs or not done:
-            print("need at least one recording and one finished search (run `make demo` first)", file=sys.stderr)
+            print(
+                "need at least one recording and one finished search (run `make demo` first)",
+                file=sys.stderr,
+            )
             return 1
         rec = next((r for r in recs if any(s["recording_id"] == r["id"] for s in done)), recs[0])
         run = next(s for s in done if s["recording_id"] == rec["id"])

@@ -1,9 +1,10 @@
 """FastAPI application factory. Binds to localhost by default and serves the built Next.js
-export from ``web/out`` when present, so one process provides API + UI."""
+export (see :func:`resolve_web_dir`) when present, so one process provides API + UI."""
 
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -16,7 +17,19 @@ from aerodoppler.config import Settings, get_settings
 from aerodoppler.jobs.store import Store
 
 log = logging.getLogger(__name__)
-WEB_OUT = Path(__file__).resolve().parents[3] / "web" / "out"
+REPO_WEB_OUT = Path(__file__).resolve().parents[3] / "web" / "out"
+PACKAGED_WEB = Path(__file__).resolve().parents[1] / "web_static"
+
+
+def resolve_web_dir() -> Path | None:
+    """Built UI location: $AERODOPPLER_WEB_DIR, else the copy bundled in the package (wheels,
+    Docker), else ``web/out`` of a source checkout. None when no build is found."""
+    env = os.environ.get("AERODOPPLER_WEB_DIR")
+    candidates = ([Path(env)] if env else []) + [PACKAGED_WEB, REPO_WEB_OUT]
+    for c in candidates:
+        if (c / "index.html").is_file():
+            return c
+    return None
 
 
 def create_app(settings: Settings | None = None, web_dir: Path | None = None) -> FastAPI:
@@ -44,8 +57,8 @@ def create_app(settings: Settings | None = None, web_dir: Path | None = None) ->
         log.exception("unhandled error on %s", request.url.path)
         return JSONResponse(status_code=500, content={"detail": f"{type(exc).__name__}: {exc}"})
 
-    web = web_dir or WEB_OUT
-    if web.exists() and (web / "index.html").exists():
+    web = web_dir if web_dir is not None else resolve_web_dir()
+    if web is not None and (web / "index.html").exists():
         app.mount("/_next", StaticFiles(directory=web / "_next"), name="next-static")
 
         @app.get("/{path:path}", include_in_schema=False)

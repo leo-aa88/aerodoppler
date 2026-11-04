@@ -15,9 +15,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
+# bundle the built UI into the package so the installed app serves it (see resolve_web_dir)
+COPY --from=web /web/out ./src/aerodoppler/web_static
 RUN uv pip install --system .
-COPY --from=web /web/out ./web/out
 COPY Makefile SPEC.md IMPLEMENTATION_REPORT.md ./
+RUN aerodoppler --version
 VOLUME ["/data"]
 EXPOSE 8000
 # 0.0.0.0 is required inside the container; docker-compose publishes it on 127.0.0.1 only.

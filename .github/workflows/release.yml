@@ -1,0 +1,339 @@
+# Build and publish an AeroDoppler release: Python wheel + sdist (with the web UI bundled)
+# attached to a GitHub Release, and a Docker image on GHCR.
+#
+# - On every pull request the build and the Docker image are produced as a DRY RUN (no tag,
+#   no publish) so a packaging break is caught before merge.
+# - A release is cut manually via workflow_dispatch (choose a semver bump), or by pushing a
+#   v*.*.* tag.
+#
+#   Git tags are the source of truth for release versions. A release never commits to main:
+#   the dispatch path computes the next version from the latest v*.*.* tag and pushes ONLY
+#   that tag. The version is stamped from the tag into src/aerodoppler/__init__.py at build
+#   time (pyproject reads it from there), so `aerodoppler --version`, /health, the wheel name
+#   and the image tag all match the tag. The committed __init__.py version is only the floor
+#   used for source installs between releases; bump it in a normal PR when wanted.
+#
+# The package is pure Python, so one Linux build serves every platform. Every artifact is
+# smoke-tested before publishing: the wheel is installed into a fresh venv, serves /health and
+# the bundled UI, and runs the offline SYNTHETIC demo; the image is started and probed the
+# same way (scripts/smoke_release.sh).
+name: Release
+
+on:
+  pull_request:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Semver bump over the latest vX.Y.Z release tag"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+
+# Read-only by default. The version, docker and publish jobs elevate only what they need.
+permissions:
+  contents: read
+
+concurrency:
+  # Group by source branch (PR) or ref (tag) so superseded runs are cancelled.
+  group: release-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  version:
+    name: Resolve version
+    # Skipped on pull_request (dry run needs no tag).
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write   # pushes the release tag (never commits to main)
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      # Gate the release on the same checks CI runs on main (offline; network tests excluded).
+      - name: Lint and test
+        env:
+          AERODOPPLER_OFFLINE: "true"
+        run: |
+          uv run ruff check src tests
+          uv run ruff format --check src tests
+          uv run pytest -q -m "not network" --timeout 1800
+
+      - name: Resolve release version
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_BUMP: ${{ github.event.inputs.bump }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          init="src/aerodoppler/__init__.py"
+
+          read_file_version() {
+            python3 -c "import re; print(re.search(r'__version__\s*=\s*\"([^\"]+)\"', open('$init').read()).group(1))"
+          }
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            git fetch --tags --force
+            # Base the bump on the highest existing v*.*.* tag, falling back to the version
+            # declared in __init__.py when there are no tags yet.
+            latest=""
+            while IFS= read -r t; do
+              if [[ "$t" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then latest="$t"; break; fi
+            done < <(git tag -l 'v*' --sort=-v:refname)
+            if [ -n "$latest" ]; then base="${latest#v}"; else base="$(read_file_version)"; fi
+
+            IFS='.' read -r major minor patch <<< "$base"
+            case "${INPUT_BUMP:-patch}" in
+              major) major=$((major + 1)); minor=0; patch=0 ;;
+              minor) minor=$((minor + 1)); patch=0 ;;
+              patch) patch=$((patch + 1)) ;;
+              *) echo "unknown bump: $INPUT_BUMP" >&2; exit 1 ;;
+            esac
+            version="${major}.${minor}.${patch}"
+            tag="v${version}"
+            echo "Base ${base}, bump ${INPUT_BUMP:-patch} -> ${version}"
+
+            if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+              echo "tag ${tag} already exists" >&2; exit 1
+            fi
+
+            # Tag ONLY; never push a commit to main. A tag pushed with GITHUB_TOKEN does not
+            # start another workflow run, so there is no recursion into the tag trigger.
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" -m "$tag"
+            git push origin "$tag"
+          else
+            # Tag push: the tag is the source of truth.
+            tag="$REF_NAME"
+            version="${tag#v}"
+          fi
+
+          if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build wheel and sdist
+    needs: version
+    # Runs on PRs (dry run, version skipped) and on releases (version succeeded).
+    if: ${{ always() && needs.version.result != 'failure' && needs.version.result != 'cancelled' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # On a release, build the tagged tree; on a PR this is empty and the PR head is used.
+          ref: ${{ needs.version.outputs.tag }}
+          # This job only builds; it never pushes. Do not leave a token in git.
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Stamp the resolved version before building. Runs only on a real release (version is
+      # empty on the PR dry run). Fails closed: if the substitution does not land, the wheel
+      # would carry the wrong version while publish names the release after the tag.
+      - name: Stamp version
+        if: ${{ needs.version.outputs.version != '' }}
+        run: |
+          python3 - "src/aerodoppler/__init__.py" "${{ needs.version.outputs.version }}" <<'PY'
+          import re, sys
+          path, version = sys.argv[1], sys.argv[2]
+          text = open(path).read()
+          new, n = re.subn(r'__version__\s*=\s*"[^"]+"', f'__version__ = "{version}"', text, count=1)
+          if n != 1:
+              sys.exit(f"failed to stamp __version__ in {path} (matched {n} times)")
+          open(path, "w").write(new)
+          PY
+
+      - name: Build web UI
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      # Bundle the static export into the package (git-ignored, included via hatch artifacts).
+      - name: Bundle web UI into the package
+        run: |
+          rm -rf src/aerodoppler/web_static
+          cp -r web/out src/aerodoppler/web_static
+          test -f src/aerodoppler/web_static/index.html
+
+      - name: Build wheel and sdist
+        run: uv build --out-dir dist
+
+      - name: Verify package contents
+        run: |
+          set -euo pipefail
+          whl="$(ls dist/*.whl)"
+          unzip -l "$whl" | grep -q "aerodoppler/web_static/index.html" || { echo "UI missing from wheel" >&2; exit 1; }
+          unzip -l "$whl" | grep -q "aerodoppler/geo/data/egm96_15min_cm.npz" || { echo "geoid grid missing from wheel" >&2; exit 1; }
+          ls -l dist
+
+      - name: Smoke test the installed wheel
+        run: scripts/smoke_release.sh wheel dist/*.whl "${{ needs.version.outputs.version }}" --demo
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 1 || 7 }}
+
+  docker:
+    name: Build Docker image
+    needs: version
+    if: ${{ always() && needs.version.result != 'failure' && needs.version.result != 'cancelled' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write   # pushes to GHCR; the push step only runs on a real release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+          persist-credentials: false
+
+      - name: Stamp version
+        if: ${{ needs.version.outputs.version != '' }}
+        run: |
+          python3 - "src/aerodoppler/__init__.py" "${{ needs.version.outputs.version }}" <<'PY'
+          import re, sys
+          path, version = sys.argv[1], sys.argv[2]
+          text = open(path).read()
+          new, n = re.subn(r'__version__\s*=\s*"[^"]+"', f'__version__ = "{version}"', text, count=1)
+          if n != 1:
+              sys.exit(f"failed to stamp __version__ in {path} (matched {n} times)")
+          open(path, "w").write(new)
+          PY
+
+      - name: Build image
+        run: docker build -t aerodoppler:candidate .
+
+      - name: Smoke test the image
+        run: |
+          set -euo pipefail
+          docker run -d --name aerodoppler-smoke -p 127.0.0.1:8000:8000 aerodoppler:candidate
+          if ! scripts/smoke_release.sh url http://127.0.0.1:8000 "${{ needs.version.outputs.version }}"; then
+            docker logs aerodoppler-smoke
+            exit 1
+          fi
+          docker rm -f aerodoppler-smoke
+
+      - name: Push to GHCR
+        if: ${{ github.event_name != 'pull_request' }}
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')"
+          echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker tag aerodoppler:candidate "$image:$VERSION"
+          docker push "$image:$VERSION"
+          if [ "$PRERELEASE" != "true" ]; then
+            docker tag aerodoppler:candidate "$image:latest"
+            docker push "$image:latest"
+          fi
+
+  publish:
+    name: Publish release
+    # Only on a real release, never on a PR dry run.
+    if: ${{ github.event_name != 'pull_request' }}
+    needs: [version, build, docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write   # creates the GitHub Release
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: python-dist
+          path: dist
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum ./* | sed 's|\./||' | tee SHA256SUMS.txt)
+          ls -l dist
+
+      - name: Release notes header
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          image="ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')"
+          cat > notes.md <<EOF
+          **Research software.** AeroDoppler is for recordings you own or have permission to analyse.
+          Scores are uncalibrated and results are ranked hypotheses; see the README and
+          IMPLEMENTATION_REPORT.md for measured accuracy and known limitations.
+
+          Install the wheel (the web UI is bundled):
+
+          \`\`\`bash
+          pip install aerodoppler-${VERSION}-py3-none-any.whl
+          aerodoppler serve        # http://127.0.0.1:8000
+          \`\`\`
+
+          Or run the image (publish on localhost only):
+
+          \`\`\`bash
+          docker run --rm -p 127.0.0.1:8000:8000 -v "\$PWD/data:/data" ${image}:${VERSION}
+          \`\`\`
+          EOF
+          cat notes.md
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.tag }}
+          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          body_path: notes.md
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS.txt
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

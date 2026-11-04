@@ -57,12 +57,19 @@ Full test suite including the slow end-to-end and API tests (~10 min):
 make test
 ```
 
-Docker (port published on 127.0.0.1 only). Note: the image build could not be verified in the
-development environment (the Docker daemon there cannot resolve registry hostnames); the
-Dockerfile mirrors the tested local install steps.
+Docker (port published on 127.0.0.1 only). The release workflow builds and smoke-tests the
+image on GitHub's runners; it could not be built in the original development environment.
 
 ```bash
 docker compose up --build
+```
+
+Released versions (wheel with the web UI bundled, sdist, checksums) are on the GitHub Releases
+page, and images are published as `ghcr.io/leo-aa88/aerodoppler:<version>`:
+
+```bash
+pip install aerodoppler-<version>-py3-none-any.whl && aerodoppler --version
+docker run --rm -p 127.0.0.1:8000:8000 -v "$PWD/data:/data" ghcr.io/leo-aa88/aerodoppler:<version>
 ```
 
 ## Workflow with real data
