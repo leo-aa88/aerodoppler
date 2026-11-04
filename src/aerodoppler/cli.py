@@ -534,6 +534,8 @@ def _summarize_result(res) -> str:
     out = {
         "run_id": res.run_id,
         "score_label": res.score_label,
+        "confidence_grade": res.confidence_grade,
+        "gates": [g.model_dump() for g in res.gates],
         "abstention": res.abstention.model_dump(),
         "warnings": res.warnings,
         "stage_counters": [c.model_dump() for c in res.stage_counters],

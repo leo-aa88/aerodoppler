@@ -51,7 +51,11 @@ def silence_penalty(
     evidence_threshold_z: float = 1.5,
     penalty_per_flight_z: float = 0.6,
     max_total_z: float = 1.5,
+    heard_slant_m: float | None = None,
 ) -> tuple[float, list[dict[str, Any]]]:
+    """``heard_slant_m``: the closest slant range among the heard (matched) passes; an unheard
+    aircraft that passed much closer than anything heard weighs more (fdop's "unheard close
+    pass"), one that passed farther than the heard ones weighs less."""
     lo_abs, hi_abs = t0_abs + gap_rel[0], t0_abs + gap_rel[1]
     if hi_abs - lo_abs < 30.0:
         return 0.0, []
@@ -67,6 +71,8 @@ def silence_penalty(
         if not (lo_abs <= cpa.t_receive_cpa <= hi_abs) or cpa.slant_range_m > audible_m:
             continue
         aud = (1.0 - cpa.slant_range_m / audible_m) * CLASS_AUDIBILITY.get(seg.aircraft_class, 0.5)
+        if heard_slant_m is not None and heard_slant_m > 0:
+            aud *= float(np.clip(heard_slant_m / max(cpa.slant_range_m, 1.0), 0.25, 2.0))
         if aud <= 0.05:
             continue
         s_centre = cpa.t_receive_cpa - t0_abs

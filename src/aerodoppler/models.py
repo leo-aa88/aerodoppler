@@ -315,6 +315,12 @@ class Abstention(BaseModel):
     detail: str | None = None
 
 
+class Gate(BaseModel):
+    name: str
+    passed: bool
+    detail: str
+
+
 class SearchResult(BaseModel):
     run_id: str
     request: SearchRequest
@@ -324,3 +330,5 @@ class SearchResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     score_label: str = "relative fit score (uncalibrated)"
     manifest: dict[str, Any] = Field(default_factory=dict)
+    confidence_grade: str = "low"  # high / medium / low — a graded verdict, not a probability
+    gates: list[Gate] = Field(default_factory=list)

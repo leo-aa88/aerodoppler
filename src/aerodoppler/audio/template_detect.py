@@ -41,6 +41,7 @@ class TemplateConfig:
     max_events: int = 8
     c_mps: float = 343.0
     harmonic2_weight: float = 0.5
+    min_half_score_z: float = 0.3  # each half of the pass must show evidence
 
 
 @njit(cache=True)
@@ -149,6 +150,15 @@ def _curve_score(
     ok = np.isfinite(z)
     if ok.sum() < cfg.n_samples // 2:
         return -9.0
+    # both halves of the pass (approach, recede) must carry evidence: steady hum, clicks and
+    # one-sided plateau pieces then cannot pass as a flyover (after fdop's matched filter)
+    half = len(te) // 2
+    a_ok, b_ok = ok[:half], ok[half:]
+    if a_ok.sum() >= 10 and b_ok.sum() >= 10:
+        za = np.clip(z[:half][a_ok], -2, 8).mean()
+        zb = np.clip(z[half:][b_ok], -2, 8).mean()
+        if min(za, zb) < cfg.min_half_score_z:
+            return -9.0
     s = np.clip(z[ok], -2, 8).mean()
     if z2 is not None:
         ok2 = np.isfinite(z2)

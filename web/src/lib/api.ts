@@ -111,6 +111,12 @@ export interface StageCounter {
   elapsed_s: number;
 }
 
+export interface Gate {
+  name: string;
+  passed: boolean;
+  detail: string;
+}
+
 export interface CandidatesResponse {
   run_id: string;
   status: string;
@@ -120,6 +126,8 @@ export interface CandidatesResponse {
   warnings: string[];
   score_label: string;
   synthetic: boolean;
+  confidence_grade?: string;
+  gates?: Gate[];
 }
 
 export interface CurveEvent {

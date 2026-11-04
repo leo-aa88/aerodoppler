@@ -142,3 +142,15 @@ gaps with frequency *and* slope continuity, and harmonic groups are anchored on 
 being unioned transitively. The event-pair picker penalises ridges with more than one steep
 descent (merged aircraft). On a semi-synthetic recording with five real aircraft this turned a
 single 1,285 s "mega-event" into the two genuine flybys plus the plateau remnants of the others.
+
+## Confidence gates (graded verdict, not a probability)
+
+After fdop (franken_doppler_finder), every answer carries a grade computed from five gates in
+this code's units: **core matches** (each event's score beats a chance-match null — the same
+predicted curves scored at 48 random clock offsets in the same recording — by ≥ 2σ, with
+coverage ≥ 40 %; two events in unknown-time mode, one in known-time mode), **clock lock** (every
+event's own best clock offset within ±4 s of the shared clock), **margin** (winner beats the best
+rival that uses different flights by ≥ 0.5 z; ≥ 0.25 z for medium), **no unheard close pass**
+(no penalised unheard aircraft; Mode A only) and **radius** (score-landscape radius ≤ 1 km).
+High needs all five, medium needs core + clock + the medium margin, everything else is low.
+The gates and their details are in `result.json`, the CLI summary and the Results screen.

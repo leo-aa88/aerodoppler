@@ -148,6 +148,8 @@ class CandidatesResponse(BaseModel):
     warnings: list[str]
     score_label: str
     synthetic: bool
+    confidence_grade: str = "low"
+    gates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PurgeResponse(BaseModel):

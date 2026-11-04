@@ -27,6 +27,7 @@ from aerodoppler.jobs.store import Store
 from aerodoppler.models import (
     Abstention,
     DopplerEvent,
+    Gate,
     LocationCandidate,
     ScoreComponents,
     SearchMode,
@@ -194,6 +195,7 @@ def _score_point(
     coarse: bool,
     taus: tuple[float, ...] | None = None,
     ultra: bool = False,
+    t0_override: np.ndarray | None = None,
 ) -> LockedResult:
     if ultra:
         cfg = ctx.ultra_cfg or ctx.coarse_cfg
@@ -230,7 +232,8 @@ def _score_point(
             )
         )
     t0c = assignment.t0_center if ctx.mode == SearchMode.UNKNOWN_TIME else float(ctx.t0_known)
-    res = locked_score(ctx.spec, curves, inputs, _t0_candidates(ctx, t0c, coarse, ultra), cfg)
+    t0s = t0_override if t0_override is not None else _t0_candidates(ctx, t0c, coarse, ultra)
+    res = locked_score(ctx.spec, curves, inputs, t0s, cfg)
     if unexplained:
         # an unexplained detected event weakens the hypothesis: it enters the mean with a
         # neutral score (archives do miss aircraft) but cannot be compensated by others
@@ -541,6 +544,7 @@ class SearchEngine:
         )
 
         # ---- ultra-coarse screen (every pair; ~10 µs each) ----------------------------------
+        self._ctx = ctx
         ctx.ultra_cfg = ScoreConfig(
             f0_step_fraction=0.03,
             f0_halfwidth_fraction=0.03,
@@ -830,6 +834,7 @@ class SearchEngine:
                         min(f.f0_lo_hz for f in feats) * 0.8,
                         max(f.f0_hi_hz for f in feats) * 1.2,
                     )
+                    heard = [x for x in sa.assignment.slant if np.isfinite(x)]
                     pen, slog = silence_penalty(
                         ctx.spec,
                         ctx.segments,
@@ -841,6 +846,7 @@ class SearchEngine:
                         ctx.silence_audible_m,
                         f0r,
                         ctx.score_cfg,
+                        heard_slant_m=min(heard) if heard else None,
                     )
             sa.silence_pen, sa.silence_log = pen, slog
             sa.total = (
@@ -848,6 +854,64 @@ class SearchEngine:
                 - pen
                 + (sa.assignment.class_prior if q.prefer_propeller_types else 0.0)
             )
+
+    def _confidence_gates(
+        self,
+        ctx: EngineContext,
+        winner: ScoredAssignment,
+        rivals: list[ScoredAssignment],
+        landscape_radius_m: float | None,
+        seed: int,
+    ) -> tuple[str, list[dict]]:
+        """Graded verdict for the top hypothesis (see rank.gate_results)."""
+        from aerodoppler.search.rank import gate_results
+
+        # fresh scoring in-process to get per-event shift curves (workers drop them)
+        full = _score_point(
+            ctx, winner.assignment, winner.observer_ecef, coarse=False, taus=winner.assignment.tau
+        )
+        shifts = full.shifts
+        own_offsets: list[float | None] = []
+        for arr in full.per_event_shift_scores:
+            if len(arr) == len(shifts) and np.isfinite(arr).any():
+                own_offsets.append(
+                    float(shifts[int(np.argmax(arr))] - shifts[full.per_event[0].shift_index])
+                )
+            else:
+                own_offsets.append(None)
+        # chance-match null: the same curves at random clock offsets far from the fitted clock
+        rng = np.random.default_rng(seed)
+        offsets = rng.uniform(-900.0, 900.0, 48)
+        offsets = offsets[np.abs(offsets) > 60.0]
+        null = _score_point(
+            ctx,
+            winner.assignment,
+            winner.observer_ecef,
+            coarse=False,
+            taus=winner.assignment.tau,
+            t0_override=full.t0_abs + offsets,
+        )
+        null_mean, null_std = [], []
+        for arr in null.per_event_shift_scores:
+            a = arr[np.isfinite(arr) & (arr > -5)]
+            null_mean.append(float(a.mean()) if a.size else 0.0)
+            null_std.append(float(a.std()) if a.size > 1 else 1.0)
+        # rival with different flights
+        wset = set(winner.assignment.seg_idx)
+        riv = [r.total for r in rivals if set(r.assignment.seg_idx) != wset]
+        margin = (winner.total - max(riv)) if riv else None
+        return gate_results(
+            n_events=len(ctx.feats),
+            mode_known_time=ctx.mode == SearchMode.KNOWN_TIME,
+            per_event_scores=[e.score for e in full.per_event],
+            per_event_coverage=[e.coverage for e in full.per_event],
+            null_mean=null_mean,
+            null_std=null_std,
+            own_clock_offsets_s=own_offsets,
+            margin_distinct_flights_z=margin,
+            unheard_close_pass_penalty=winner.silence_pen if ctx.silence else None,
+            landscape_radius_m=landscape_radius_m,
+        )
 
     @staticmethod
     def _as_point(sa: ScoredAssignment) -> ScoredPoint:
@@ -980,6 +1044,18 @@ class SearchEngine:
         manifest = self._manifest(
             req, run_id, rec, spec, events, feats, c, datasets, dem, synthetic
         )
+        grade, gates = "low", []
+        ctx = getattr(self, "_ctx", None)
+        if refined and ctx is not None and not abst.abstained:
+            try:
+                rivals = list(scored_coarse or []) + list(refined[1:])
+                grade, gates = self._confidence_gates(
+                    ctx, refined[0], rivals, cands[0].estimated_uncertainty_m, req.seed
+                )
+            except Exception as e:  # gates are diagnostics; never fail the run
+                self.warnings.append(
+                    f"confidence gates could not be evaluated: {type(e).__name__}: {e}"
+                )
         result = SearchResult(
             run_id=run_id,
             request=req,
@@ -988,6 +1064,8 @@ class SearchEngine:
             abstention=abst,
             warnings=self.warnings,
             manifest=manifest,
+            confidence_grade=grade,
+            gates=[Gate(**g) for g in gates],
         )
         self._export(
             out_dir,

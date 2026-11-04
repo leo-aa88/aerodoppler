@@ -221,6 +221,7 @@ class LockedResult:
     per_event: list[EventScore]
     shift_scores: NDArray[np.float64] = field(repr=False)  # combined score as function of t0 shift
     shifts: NDArray[np.float64] = field(repr=False)
+    per_event_shift_scores: list[NDArray[np.float64]] = field(default_factory=list, repr=False)
 
 
 def f0_grid(lo: float, hi: float, step_fraction: float) -> NDArray[np.float64]:
@@ -417,4 +418,5 @@ def locked_score(
         per_event,
         combined_by_shift,
         t0_candidates - t0_candidates[0],
+        per_shift,
     )

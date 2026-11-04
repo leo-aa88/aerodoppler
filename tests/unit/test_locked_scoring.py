@@ -109,3 +109,46 @@ def pytest_approx(v, rel):
     import pytest
 
     return pytest.approx(v, rel=rel)
+
+
+def test_confidence_gates_grading():
+    from aerodoppler.search.rank import gate_results
+
+    good = dict(
+        n_events=2,
+        mode_known_time=False,
+        per_event_scores=[4.0, 3.5],
+        per_event_coverage=[0.9, 0.8],
+        null_mean=[0.5, 0.4],
+        null_std=[0.4, 0.4],
+        own_clock_offsets_s=[0.0, 1.0],
+        margin_distinct_flights_z=0.8,
+        unheard_close_pass_penalty=0.0,
+        landscape_radius_m=300.0,
+    )
+    grade, gates = gate_results(**good)
+    assert grade == "high" and all(g["passed"] for g in gates)
+    # one event does not beat chance -> low
+    grade, _ = gate_results(**{**good, "per_event_scores": [4.0, 0.9]})
+    assert grade == "low"
+    # clock disagreement -> low
+    grade, _ = gate_results(**{**good, "own_clock_offsets_s": [0.0, 7.0]})
+    assert grade == "low"
+    # thin margin -> medium; unheard close pass -> medium (all else fine)
+    assert gate_results(**{**good, "margin_distinct_flights_z": 0.3})[0] == "medium"
+    assert gate_results(**{**good, "unheard_close_pass_penalty": 0.6})[0] == "medium"
+    # single event is enough in known-time mode
+    assert (
+        gate_results(
+            **{
+                **good,
+                "mode_known_time": True,
+                "per_event_scores": [4.0],
+                "per_event_coverage": [0.9],
+                "null_mean": [0.5],
+                "null_std": [0.4],
+                "own_clock_offsets_s": [0.0],
+            }
+        )[0]
+        == "high"
+    )

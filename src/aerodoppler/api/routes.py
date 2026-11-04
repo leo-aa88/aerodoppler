@@ -448,6 +448,8 @@ def search_candidates(run_id: str, store: Store = Depends(get_store_dep)) -> S.C
         warnings=res.warnings,
         score_label=res.score_label,
         synthetic=bool(res.manifest.get("synthetic_data")),
+        confidence_grade=res.confidence_grade,
+        gates=[g.model_dump() for g in res.gates],
     )
 
 

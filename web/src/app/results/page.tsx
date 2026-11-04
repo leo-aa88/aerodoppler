@@ -106,6 +106,18 @@ function Results() {
         </div>
       )}
       {res?.warnings?.length ? <div className="banner warn">{res.warnings.join(" · ")}</div> : null}
+      {res && res.candidates.length > 0 && (
+        <div className={`banner ${res.confidence_grade === "high" ? "ok" : res.confidence_grade === "medium" ? "warn" : "danger"}`}>
+          <b>Confidence grade: {(res.confidence_grade ?? "low").toUpperCase()}</b> (graded verdict from five gates, not a probability)
+          <ul className="small" style={{ margin: "6px 0 0 16px" }}>
+            {(res.gates ?? []).map((g) => (
+              <li key={g.name}>
+                {g.passed ? "✓" : "✗"} <code>{g.name}</code> — {g.detail}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="panel">
         <h2>
           Run <code>{run}</code> · {res?.score_label} · <span className="muted small">{status?.cpu_seconds ? `CPU ${status.cpu_seconds}s · peak RSS ${status.peak_rss_mb} MB` : ""}</span>
