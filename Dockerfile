@@ -1,7 +1,7 @@
 # AeroDoppler: API + built UI in one container. Binds to 127.0.0.1 inside the container; map it
 # to a localhost port only (see docker-compose.yml). No data leaves the container unless an
 # ADSB.lol / DEM import is requested.
-FROM node:22-bookworm-slim AS web
+FROM node:26-bookworm-slim AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json* ./
 RUN npm install --no-audit --no-fund
