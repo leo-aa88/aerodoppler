@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "copy-map-worker": "node -e \"require('fs').copyFileSync(require.resolve('maplibre-gl/dist/maplibre-gl-worker.mjs'), 'public/maplibre-gl-worker.mjs')\"",
+    "predev": "npm run copy-map-worker",
     "dev": "next dev -p 3000",
+    "prebuild": "npm run copy-map-worker",
     "build": "next build",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"

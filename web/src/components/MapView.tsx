@@ -41,6 +41,9 @@ export function MapView({ candidates, tracks, heat, truth, selected, onSelect, b
     import("maplibre-gl").then((lib) => {
       if (cancelled || !el.current) return;
       libRef.current = lib;
+      // MapLibre 6 loads its worker as a separate module next to its own file, which the
+      // bundler does not emit; serve the copy from public/ (see the copy-map-worker script).
+      lib.setWorkerUrl("/maplibre-gl-worker.mjs");
       const m = new lib.Map({ container: el.current, style: BLANK_STYLE, center: [0, 0], zoom: 2, attributionControl: false });
       m.addControl(new lib.NavigationControl(), "top-right");
       m.addControl(new lib.ScaleControl({ unit: "metric" }), "bottom-left");
@@ -67,11 +70,14 @@ export function MapView({ candidates, tracks, heat, truth, selected, onSelect, b
     const m = mapRef.current;
     const lib = libRef.current;
     if (!m || !lib || !m.isStyleLoaded()) return;
-    const rm = (id: string) => {
+    // Remove every layer before any source: "cand-labels" draws from the "cands" source, and
+    // MapLibre refuses to remove a source that a layer still uses.
+    ["heat", "tracks", "tracks-used", "cands", "cand-labels", "truth", "bbox"].forEach((id) => {
       if (m.getLayer(id)) m.removeLayer(id);
+    });
+    ["heat", "tracks", "tracks-used", "cands", "truth", "bbox"].forEach((id) => {
       if (m.getSource(id)) m.removeSource(id);
-    };
-    ["heat", "tracks", "tracks-used", "cands", "cand-labels", "truth", "bbox"].forEach(rm);
+    });
     if (bbox && bbox.length === 4) {
       const [w, s, e, n] = bbox;
       m.addSource("bbox", { type: "geojson", data: { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [[w, s], [e, s], [e, n], [w, n], [w, s]] } } });

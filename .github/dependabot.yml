@@ -34,7 +34,7 @@ updates:
       # so the "@/..." path aliases stop resolving and the build fails. Revisit with Next.js.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
-      # Node type definitions should follow the Node major the UI is built with (22).
+      # Node type definitions should follow the Node major the UI is built with; bump deliberately.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
 

@@ -61,7 +61,8 @@ def create_app(settings: Settings | None = None, web_dir: Path | None = None) ->
     if web is not None and (web / "index.html").exists():
         app.mount("/_next", StaticFiles(directory=web / "_next"), name="next-static")
 
-        @app.get("/{path:path}", include_in_schema=False)
+        # HEAD as well as GET: Next.js 16 prefetches pages with HEAD requests.
+        @app.api_route("/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
         async def _spa(path: str):
             # static export: /foo -> foo.html, /foo/ -> foo/index.html
             if path.startswith("api/"):

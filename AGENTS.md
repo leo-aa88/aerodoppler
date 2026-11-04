@@ -85,6 +85,9 @@ before committing; a lint warning that "an unsafe fix is available" is still a f
 - `src/aerodoppler/web_static/` is the UI bundled for releases; it is git-ignored and included in
   wheels through `[tool.hatch.build] artifacts`. The app finds the UI via `resolve_web_dir()`
   (`$AERODOPPLER_WEB_DIR` → packaged copy → `web/out`).
+- MapLibre 6 loads its worker as a separate module. `npm run build`/`dev` copy it to
+  `web/public/maplibre-gl-worker.mjs` (git-ignored) and `MapView.tsx` calls `setWorkerUrl`; without
+  that the map renders empty. The static-UI route must answer `HEAD` too (Next 16 prefetches).
 - `AERODOPPLER_OFFLINE=true` forbids network access; tests that need the network are marked
   `network`. Tests marked `slow` take minutes.
 - The version lives only in `src/aerodoppler/__init__.py`; releases stamp it from the git tag
