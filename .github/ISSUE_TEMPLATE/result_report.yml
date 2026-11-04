@@ -1,0 +1,61 @@
+name: Real-world result report
+description: Share how a search performed on a real recording (successes and failures are both useful).
+title: "[Result]: "
+labels: ["validation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Reports like this are the only way to learn how the method behaves outside synthetic
+        tests. **Only report recordings you own or have the recordist's consent to share, and
+        do not post exact coordinates unless the location is already public** (for example a
+        published webcam). An error distance is enough.
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Consent
+      options:
+        - label: I own this recording or have the recordist's permission to share these results.
+          required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Search mode
+      options:
+        - Mode A (unknown time, date known)
+        - Mode B (known start time)
+    validations:
+      required: true
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: Outcome
+      options:
+        - Correct (top-1 within about 500 m)
+        - Correct among the top 3, not at rank 1
+        - Wrong location
+        - Abstained
+        - Crashed or could not run
+    validations:
+      required: true
+  - type: input
+    id: error
+    attributes:
+      label: Top-1 error distance (m), if known
+  - type: input
+    id: grade
+    attributes:
+      label: Confidence grade and failing gates
+      placeholder: "low; failing: margin_distinct_location, radius"
+  - type: textarea
+    id: setup
+    attributes:
+      label: Recording and setup
+      description: Device, duration, environment (wind, traffic noise), how events were chosen (auto or manual), number of events, bbox size, clock uncertainty.
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Anything else
+      description: Stage counters, warnings, or screenshots of the curve overlays (no maps of private places).

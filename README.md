@@ -150,11 +150,18 @@ known degeneracies.
   a physical consistency prior when exceeded) dominates: ~25 min on 6 cores and ~2.3 GB RSS at the
   default cap, ~8 min at 60,000. National-scale search is opt-in and not optimised.
 
+## Contributing
+
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests and the
+evidence expected for changes to detection or scoring. Use the issue forms for bugs, features,
+questions and real-world result reports, and [SECURITY.md](SECURITY.md) for vulnerabilities.
+This project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Data attribution and licences
 
 Flight data © adsb.lol feeders, Open Database License (ODbL) 1.0
 (https://www.adsb.lol/docs/open-data/historical). Elevation: USGS 3DEP (public domain),
 Copernicus DEM GLO-30 (© DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018, provided
 under COPERNICUS by the European Union and ESA). Geoid: EGM96 (NGA, public domain). This software:
-MIT. Case-study reference: Colsto, *I discovered a sound that leaks your exact location*
+[MIT](LICENSE). Case-study reference: Colsto, *I discovered a sound that leaks your exact location*
 (https://www.youtube.com/watch?v=UytYrhYLOKI) — a demonstration, not a validated accuracy claim.

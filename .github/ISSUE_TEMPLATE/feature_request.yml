@@ -1,0 +1,56 @@
+name: Feature request
+description: Suggest a new capability or an improvement to an existing one.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        AeroDoppler is a consent-based, local-first research tool. Requests for bulk scraping of
+        other people's recordings, social-media monitoring, identification of recording owners
+        or covert tracking will be closed (see CONTRIBUTING.md and docs/privacy.md).
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What are you trying to do, and what stops you today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How should it work? CLI flags, API fields or UI behaviour are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence it would help
+      description: For changes to detection, scoring or search, say how you would measure the effect (which benchmark, which metric).
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Physics / forward model
+        - Event detection
+        - Search / scoring
+        - Confidence and abstention
+        - Data sources (ADS-B, DEM, weather)
+        - Performance
+        - Web UI
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to open a pull request for this.

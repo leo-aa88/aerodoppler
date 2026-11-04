@@ -1,0 +1,83 @@
+name: Bug report
+description: Something crashes, gives a wrong error, or behaves differently from the docs.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Do not attach private recordings, spectrograms of them, or
+        locations derived from them.** If the bug needs data to reproduce, try `make demo`
+        (synthetic) or a public recording first, and describe the input instead of uploading it.
+
+        A wrong *location* on a real recording is usually not a bug: the method has known
+        failure modes (dense traffic, a single straight flyover, weak audio). Use the
+        "Real-world result report" form for those.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you run, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands, ideally starting from `make setup`.
+      placeholder: |
+        1. uv run aerodoppler demo --out data/runs/demo
+        2. ...
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error output or logs
+      description: Full traceback or the relevant part of `data/runs/<run-id>/job.log`. Remove coordinates and file names you consider private.
+      render: text
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      multiple: true
+      options:
+        - Flight import (ADSB.lol / local traces)
+        - Audio ingest / decode
+        - Spectrogram / event detection
+        - Search (Mode A, unknown time)
+        - Search (Mode B, known time)
+        - Confidence gates / abstention
+        - DEM / geoid / altitude
+        - API / job runner
+        - Web UI
+        - Benchmarks
+        - Docker / CI / packaging
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `git rev-parse --short HEAD`, or the package version.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version (`uv run python --version`), FFmpeg version (`ffmpeg -version | head -1`), CPU count, and whether you ran offline.
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This report contains no private recordings or locations of people who did not consent.
+          required: true

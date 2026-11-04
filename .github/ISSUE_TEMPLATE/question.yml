@@ -1,0 +1,21 @@
+name: Question
+description: Ask how something works or how to use it.
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before asking, please check the README, `docs/theory.md`, `docs/validation.md` and
+        `IMPLEMENTATION_REPORT.md`. Do not post private recordings or locations.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What you have tried, commands you ran, and the relevant output.
