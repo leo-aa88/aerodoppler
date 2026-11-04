@@ -22,6 +22,7 @@ from aerodoppler import __version__
 from aerodoppler.adsb.index import FlightDataset, FlightIndex, list_datasets
 from aerodoppler.audio.spectrogram import Spectrogram
 from aerodoppler.config import Settings
+from aerodoppler.geo.coordinates import geodetic_to_ecef, haversine_m
 from aerodoppler.geo.dem import DEMError, FlatDEM, open_dem_for_bbox
 from aerodoppler.jobs.store import Store
 from aerodoppler.models import (
@@ -934,7 +935,7 @@ class SearchEngine:
         """Re-refine the winner on a ±100 m / 25 m grid under declared perturbations (speed of
         sound ±5 m/s; observer-vs-flight height bias ±150 m) and report how far the answer
         moves and how much it loses. Engineering scenarios, not a confidence region."""
-        from aerodoppler.geo.coordinates import ecef_to_geodetic, geodetic_to_ecef, haversine_m
+        from aerodoppler.geo.coordinates import ecef_to_geodetic, haversine_m
         from aerodoppler.physics.propagation import SoundSpeed
 
         lat0, lon0, h0 = ecef_to_geodetic(winner.observer_ecef)
