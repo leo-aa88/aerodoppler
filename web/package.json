@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "maplibre-gl": "^4.7.1",
+    "maplibre-gl": "^6.16.0",
     "next": "^16.4.3",
     "plotly.js-dist-min": "^4.2.0",
     "react": "^19.0.0",
