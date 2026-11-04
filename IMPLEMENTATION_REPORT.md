@@ -311,7 +311,9 @@ here: the 29 passages on 2026-05-16/17 (the two days whose ADSB.lol archives wer
 3.5 GB each; the remaining 11 passages are on four other days and were not run). Three further
 passages are trilateration outliers (recorded elsewhere) and were excluded.
 
-Protocol (`aerodoppler benchmark --livermore … --datasets adsblol_2026-05-17_c432e6e8,adsblol_2026-05-16_c432e6e8`):
+Protocol (`aerodoppler benchmark --livermore … --datasets adsblol_2026-05-17_c432e6e8,adsblol_2026-05-16_c432e6e8`;
+note that the recording clock comes from the dataset's own UTC-stamped ridge, so this validates
+the location search given a ±2 s clock, not clock discovery):
 recorder position trilaterated from the published per-passage track offsets (37 inliers, rms
 0.06 m against the author's own geometry — i.e. the author's coordinate recovered, not an
 independent survey); audio sample-zero UTC recovered by sliding the published UTC ridge over our
@@ -497,6 +499,22 @@ code copied):
    its emission-time physics and ADS-B cleanup were already present. fdop's own reported
    results (224 m at the reference site, mixed/frequently wrong elsewhere) match our
    experience that dense or sparse real traffic, not the physics, decides success.
+
+6. **1337isnot1337/DOPPLERGEIST** (Python, 141 stars, reviewed at the user's request): the
+   most process-heavy of the four (resumable tiled search, disk-backed accounting of discarded
+   candidates, extensive benchmark ledgers) but, by its own status table, "no accepted blind
+   real localization"; its automatic-discovery runs on the same 40 Livermore clips all returned
+   `needs_input / recording_time_required` because it refuses to search without defensible
+   clock evidence. That is a fair policy and it sharpens a caveat on our Livermore numbers:
+   our known-time runs take the clock from the dataset's own UTC-stamped ridge (a
+   dataset-assisted step, equivalent to a recordist supplying the start time to ±2 s), so they
+   validate the location search, not clock discovery. DOPPLERGEIST also surveyed AeroSonicDB
+   (Zenodo 8368882) and the NASA small-UAV acoustics set and found neither gives recorder
+   coordinates/clock precise enough for a 100 m claim — consistent with our dataset search.
+   Taken over as design guidance: keep refusing (abstaining) without a date or clock, keep
+   competing explanations visible (top-K distinct maxima, ambiguity flag), and report the
+   100/500/1,000 m thresholds (now in the Livermore table). Its joint all-flyover matching under
+   one clock corresponds to our opt-in multi-event mode.
 
 Ideas noted but not implemented: fdop's per-(event, flight) locus hypotheses instead of a ground
 grid (an optimisation), profile-likelihood ranges on fitted curve parameters, evidence in nats
