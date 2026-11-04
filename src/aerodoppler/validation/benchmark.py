@@ -324,9 +324,23 @@ def run_real_trajectory_benchmark(
     outcomes: list[CaseOutcome] = []
     oracle_outcomes: list[CaseOutcome] = []
     rows: list[dict[str, Any]] = []
+    # checkpoint after every case so an hours-long run can be resumed with the same command:
+    # finished cases are read back from <out_dir>/checkpoint.json and skipped
+    ckpt = out_dir / "checkpoint.json"
+    if ckpt.exists():
+        rows = json.loads(ckpt.read_text())
+        for row in rows:
+            if "mode_a" in row:
+                outcomes.append(CaseOutcome(**row["mode_a"]))
+            if "mode_a_oracle_events" in row:
+                oracle_outcomes.append(CaseOutcome(**row["mode_a_oracle_events"]))
+        log(f"[realtraj] resuming: {len(rows)} case(s) already in {ckpt}")
+    done = {row["case"] for row in rows}
     for name, lat, lon in observers:
         for seed in seeds:
             cname = f"{name}_s{seed}"
+            if cname in done:
+                continue
             local_bbox = BBox(west=lon - 0.18, south=lat - 0.15, east=lon + 0.18, north=lat + 0.15)
             try:
                 dem = open_dem_for_bbox(settings.dem_dir, local_bbox, offline=settings.offline)
@@ -339,6 +353,7 @@ def run_real_trajectory_benchmark(
             except Exception as e:
                 log(f"[realtraj] {cname}: scenario not possible: {e}")
                 rows.append({"case": cname, "error": str(e)})
+                ckpt.write_text(json.dumps(rows, indent=2, default=str))
                 continue
             rec = ingest_recording(
                 store,
@@ -502,6 +517,7 @@ def run_real_trajectory_benchmark(
                     oracle_outcomes.append(oco)
                     row["mode_a_oracle_events"] = asdict(oco)
             rows.append(row)
+            ckpt.write_text(json.dumps(rows, indent=2, default=str))
     report = {
         "label": "SEMI-SYNTHETIC BENCHMARK — real ADS-B trajectories + real DEM, SIMULATED audio; not real-world accuracy",
         "dataset_id": dataset_id,
