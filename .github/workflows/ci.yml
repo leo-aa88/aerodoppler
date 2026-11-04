@@ -7,8 +7,8 @@ jobs:
   python:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: uv sync --all-extras
       - run: uv run ruff check src tests
@@ -20,8 +20,8 @@ jobs:
   web:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: cd web && npm install --no-audit --no-fund && npm run build
