@@ -498,6 +498,11 @@ def search_cmd(
     ground_elevation_sigma_m: float | None = typer.Option(None, "--ground-elevation-sigma"),
     temperature_c: float | None = typer.Option(None, "--temperature-c"),
     offline: bool = typer.Option(False, "--offline"),
+    screen_budget_s: float = typer.Option(
+        1800.0,
+        "--screen-budget-s",
+        help="time budget of the candidate screen; candidates are scored most-consistent first and the result says how many were scored",
+    ),
 ) -> None:
     """Run a bounded Mode A / Mode B search in this process and print ranked hypotheses."""
     from aerodoppler.config import Settings, reset_settings_cache
@@ -518,6 +523,7 @@ def search_cmd(
         ground_elevation_m=ground_elevation_m,
         ground_elevation_sigma_m=ground_elevation_sigma_m,
         temperature_c=temperature_c,
+        screen_budget_s=screen_budget_s,
     )
     try:
         req = SearchRequest(

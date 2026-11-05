@@ -77,6 +77,66 @@ class Assignment:
     class_prior: float
 
 
+class TooManySegments(ValueError):
+    pass
+
+
+@dataclass
+class AssignmentPool:
+    """Every candidate hypothesis, best physical-consistency prior first, as compact arrays.
+
+    ``Assignment`` objects are created only for the slice being scored (:meth:`take`), so the
+    pool can hold millions of candidates; the search scores them in this order until its budget
+    is spent and reports how far it got (anytime search, see SearchEngine). ``cost`` is the
+    consistency prior (sum over events of |log(slant / slant implied by the Doppler slope)|;
+    lower = more consistent) — a priority, not a score bound."""
+
+    point_idx: np.ndarray
+    seg: np.ndarray  # (n, k)
+    tau: np.ndarray  # (n, k)
+    slant: np.ndarray  # (n, k)
+    t0_center: np.ndarray
+    class_prior: np.ndarray
+    cost: np.ndarray
+
+    def __len__(self) -> int:
+        return int(len(self.point_idx))
+
+    def take(self, a: int, b: int) -> list[Assignment]:
+        return [
+            Assignment(
+                int(self.point_idx[i]),
+                tuple(int(x) for x in self.seg[i]),
+                tuple(float(x) for x in self.tau[i]),
+                tuple(float(x) for x in self.slant[i]),
+                float(self.t0_center[i]),
+                float(self.class_prior[i]),
+            )
+            for i in range(a, min(b, len(self)))
+        ]
+
+    @classmethod
+    def empty(cls, k: int) -> AssignmentPool:
+        z = np.zeros(0)
+        return cls(
+            z.astype(np.int64),
+            np.zeros((0, k), np.int64),
+            np.zeros((0, k)),
+            np.zeros((0, k)),
+            z,
+            z,
+            z,
+        )
+
+
+def _slope_prior(sp: SparseCPA, idx: np.ndarray, f: EventFeatures, c_mps: float) -> np.ndarray:
+    """|log(geometric slant / slant implied by the event's Doppler slope and the flight speed)|."""
+    if f.slope_max_hz_per_s <= 1e-4:
+        return np.zeros(len(idx))
+    d_est = f.f_center_hz * sp.speed[idx] ** 2 / (c_mps * f.slope_max_hz_per_s)
+    return np.abs(np.log(np.maximum(sp.slant[idx], 1.0) / np.maximum(d_est, 1.0)))
+
+
 @dataclass
 class PreselectResult:
     segments: list[SegmentInfo]
@@ -120,11 +180,12 @@ def load_segments(
         )
     )
     if segs.height > max_segments:
-        warnings.append(f"{segs.height} segments exceed cap {max_segments}; keeping the longest")
-        segs = (
-            segs.with_columns((pl.col("last_utc") - pl.col("first_utc")).alias("dur"))
-            .sort("dur", descending=True)
-            .head(max_segments)
+        # keeping "the longest" (as before) silently dropped aircraft for a reason unrelated to
+        # the evidence; refuse instead and say how to make the problem smaller
+        raise TooManySegments(
+            f"{segs.height} flight segments match the area, time window and speed bounds, above "
+            f"the {max_segments} this search holds in memory; shrink the search area or the time "
+            "window (or raise quality_settings.max_segments if the machine has the memory)"
         )
     t1 = time.perf_counter()
     samples = index.load_samples(segs["segment_id"].to_list()) if segs.height else pl.DataFrame()
@@ -246,18 +307,18 @@ def mode_a_pairs(
     max_assignments: int,
     warnings: list[str],
     c_mps: float = 343.0,
-) -> list[Assignment]:
+) -> AssignmentPool:
     """Two-event pairing: tau_2 - tau_1 = Δt ± tol, with per-event speed/slant bounds.
 
-    Fully vectorised. If more pairs than ``max_assignments`` exist, the pairs kept are those with
-    the best *physical consistency prior* (slant range implied by each event's Doppler slope and
-    the flight's actual CPA speed vs. the geometric slant range), never simply the first ones in
-    grid order; a warning is recorded.
+    Fully vectorised. Returns every valid pair ordered by the *physical consistency prior*
+    (slant range implied by each event's Doppler slope and the flight's CPA speed vs. the
+    geometric slant range). ``max_assignments`` only guards memory; when it bites, the best
+    prior is kept and a warning marks the search incomplete.
     """
     t0 = time.perf_counter()
     if len(sp.tau) == 0:
         counters.append(_counter("mode_a_pairs", 0, 0, t0, "no CPA entries"))
-        return []
+        return AssignmentPool.empty(2)
     f1, f2 = feats[0], feats[1]
     ok1 = (
         (sp.speed >= f1.v_min_mps)
@@ -285,7 +346,7 @@ def mode_a_pairs(
     t1 = time.perf_counter()
     if len(a_idx) == 0 or len(b_idx) == 0:
         counters.append(_counter("mode_a_pairs", 0, 0, t1, "no entries pass the event bounds"))
-        return []
+        return AssignmentPool.empty(2)
     tbase = float(np.min(sp.tau))
     key_b = sp.point_idx[b_idx].astype(np.float64) * 1e6 + (sp.tau[b_idx] - tbase)
     order = np.argsort(key_b)
@@ -302,7 +363,7 @@ def mode_a_pairs(
                 "mode_a_pairs", 0, 0, t1, f"Δt={delta_t_s:.1f}s ± {tol_s:.1f}s: no pair matches"
             )
         )
-        return []
+        return AssignmentPool.empty(2)
     # materialise all (ia, ib) pairs without a Python loop
     rep_a = np.repeat(np.arange(len(a_idx)), counts)
     offsets = np.arange(n_pairs_total) - np.repeat(np.cumsum(counts) - counts, counts)
@@ -312,38 +373,34 @@ def mode_a_pairs(
     ia, ib = ia[~same], ib[~same]
     n_valid = len(ia)
     note = f"Δt={delta_t_s:.1f}s ± {tol_s:.1f}s; {int(same.sum())} same-flight pairs removed"
+    cost = _slope_prior(sp, ia, f1, c_mps) + _slope_prior(sp, ib, f2, c_mps)
+    order = np.argsort(cost, kind="stable")
     if n_valid > max_assignments:
-        # physical consistency prior: |log(r_geom / d_est)| per event, d_est = f_c v^2 / (c |df/dt|)
-        def _prior(idx: np.ndarray, f: EventFeatures) -> np.ndarray:
-            if f.slope_max_hz_per_s <= 1e-4:
-                return np.zeros(len(idx))
-            d_est = f.f_center_hz * sp.speed[idx] ** 2 / (c_mps * f.slope_max_hz_per_s)
-            return np.abs(np.log(np.maximum(sp.slant[idx], 1.0) / np.maximum(d_est, 1.0)))
-
-        cost = _prior(ia, f1) + _prior(ib, f2)
-        keep = np.argpartition(cost, max_assignments - 1)[:max_assignments]
-        ia, ib = ia[keep], ib[keep]
+        # memory guard only: the pool is scored in prior order within a time budget anyway
+        order = order[:max_assignments]
         warnings.append(
-            f"{n_valid} Mode A pairs exceed the cap {max_assignments}; kept the {max_assignments} with the best slant-distance consistency prior (raise quality_settings.max_assignments or shrink the bbox for completeness)"
+            f"{n_valid} Mode A pairs exceed the cap {max_assignments} that can be held in memory; "
+            f"the {max_assignments} with the best slant-distance consistency prior are kept "
+            "(shrink the area or the time window for a complete search)"
         )
-        note += f"; capped {n_valid} -> {max_assignments} by consistency prior"
-    priors = 0.5 * (
-        np.array([segments[s].class_prior for s in sp.seg_idx[ia]])
-        + np.array([segments[s].class_prior for s in sp.seg_idx[ib]])
+        note += f"; memory guard {n_valid} -> {max_assignments} by consistency prior"
+    ia, ib, cost = ia[order], ib[order], cost[order]
+    seg_prior = np.array([s.class_prior for s in segments])
+    pool = AssignmentPool(
+        point_idx=sp.point_idx[ia].astype(np.int64),
+        seg=np.stack([sp.seg_idx[ia], sp.seg_idx[ib]], axis=1).astype(np.int64),
+        tau=np.stack([sp.tau[ia], sp.tau[ib]], axis=1),
+        slant=np.stack([sp.slant[ia], sp.slant[ib]], axis=1),
+        t0_center=sp.tau[ia] - f1.t_center_s,
+        class_prior=0.5 * (seg_prior[sp.seg_idx[ia]] + seg_prior[sp.seg_idx[ib]]),
+        cost=cost,
     )
-    out = [
-        Assignment(
-            int(sp.point_idx[a]),
-            (int(sp.seg_idx[a]), int(sp.seg_idx[b])),
-            (float(sp.tau[a]), float(sp.tau[b])),
-            (float(sp.slant[a]), float(sp.slant[b])),
-            float(sp.tau[a]) - f1.t_center_s,
-            float(pr),
+    counters.append(
+        _counter(
+            "mode_a_pairs", n_pairs_total, len(pool), t1, note + "; ordered by consistency prior"
         )
-        for a, b, pr in zip(ia, ib, priors, strict=True)
-    ]
-    counters.append(_counter("mode_a_pairs", n_pairs_total, len(out), t1, note))
-    return out
+    )
+    return pool
 
 
 def mode_b_matches(
@@ -356,13 +413,17 @@ def mode_b_matches(
     counters: list[StageCounter],
     max_assignments: int,
     warnings: list[str],
-) -> list[Assignment]:
+    c_mps: float = 343.0,
+) -> AssignmentPool:
     """Known-time matching: for each event, tau within t0 + s_centre ± (sigma + tol); a
-    candidate point needs one matching segment per event (segments distinct across events)."""
+    candidate point needs one matching segment per event (segments distinct across events).
+    Returns every match ordered by the consistency prior (the old cap stopped in grid order,
+    i.e. arbitrarily); ``max_assignments`` only guards memory."""
     t0 = time.perf_counter()
+    k = len(feats)
     if len(sp.tau) == 0:
         counters.append(_counter("mode_b_matches", 0, 0, t0, "no CPA entries"))
-        return []
+        return AssignmentPool.empty(k)
     per_event: list[dict[int, list[int]]] = []
     n_entries = 0
     for f in feats:
@@ -382,7 +443,8 @@ def mode_b_matches(
     points = set(per_event[0].keys())
     for d in per_event[1:]:
         points &= set(d.keys())
-    out: list[Assignment] = []
+    rows: list[list[int]] = []
+    pts: list[int] = []
     for p in sorted(points):
         combos: list[list[int]] = [[]]
         for d in per_event:
@@ -392,33 +454,36 @@ def mode_b_matches(
                 for i in d[p]
                 if sp.seg_idx[i] not in {sp.seg_idx[j] for j in c}
             ]
-        for c in combos:
-            prior = float(np.mean([segments[sp.seg_idx[i]].class_prior for i in c]))
-            out.append(
-                Assignment(
-                    p,
-                    tuple(int(sp.seg_idx[i]) for i in c),
-                    tuple(float(sp.tau[i]) for i in c),
-                    tuple(float(sp.slant[i]) for i in c),
-                    t0_known,
-                    prior,
-                )
-            )
-            if len(out) >= max_assignments:
-                warnings.append(f"assignment cap {max_assignments} reached in Mode B matching")
-                break
-        if len(out) >= max_assignments:
-            break
-    counters.append(
-        _counter(
-            "mode_b_matches",
-            n_entries,
-            len(out),
-            t0,
-            f"|tau - (t0 + s)| <= {sigma_t0:.1f}+{tol_s:.1f} s",
+        rows.extend(combos)
+        pts.extend([p] * len(combos))
+    if not rows:
+        counters.append(
+            _counter("mode_b_matches", n_entries, 0, t0, "no point matches every event")
         )
+        return AssignmentPool.empty(k)
+    ent = np.array(rows, dtype=np.int64)  # (n, k) CPA-entry indices
+    cost = sum(_slope_prior(sp, ent[:, e], feats[e], c_mps) for e in range(k))
+    order = np.argsort(cost, kind="stable")
+    note = f"|tau - (t0 + s)| <= {sigma_t0:.1f}+{tol_s:.1f} s; ordered by consistency prior"
+    if len(order) > max_assignments:
+        warnings.append(
+            f"{len(order)} Mode B matches exceed the cap {max_assignments} that can be held in "
+            "memory; the best consistency prior is kept"
+        )
+        order = order[:max_assignments]
+    ent, cost = ent[order], cost[order]
+    seg_prior = np.array([s.class_prior for s in segments])
+    pool = AssignmentPool(
+        point_idx=np.array(pts, dtype=np.int64)[order],
+        seg=sp.seg_idx[ent].astype(np.int64),
+        tau=sp.tau[ent],
+        slant=sp.slant[ent],
+        t0_center=np.full(len(ent), float(t0_known)),
+        class_prior=seg_prior[sp.seg_idx[ent]].mean(axis=1),
+        cost=cost,
     )
-    return out
+    counters.append(_counter("mode_b_matches", n_entries, len(pool), t0, note))
+    return pool
 
 
 def summarize_segments(segments: list[SegmentInfo]) -> list[dict[str, Any]]:
