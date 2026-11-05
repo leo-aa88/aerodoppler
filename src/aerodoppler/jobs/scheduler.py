@@ -280,6 +280,26 @@ class Scheduler:
             elif waited > self.cancel_grace_s:
                 self._kill(job, signal.SIGTERM)
 
+    def fail_oversized(self, cap) -> list[str]:
+        """Fail queued jobs whose reservation exceeds the whole budget (e.g. queued before the
+        budget was lowered): they could never start and must not wait forever."""
+        out = []
+        for job in self.queue.list(statuses=["queued"], limit=1000):
+            if job.mode == "worker" and job.memory_mb > cap.memory_budget_mb:
+                if self.queue.finish(
+                    job.id,
+                    None,
+                    "failed",
+                    error_code="insufficient_memory",
+                    error_message=(
+                        f"needs about {job.memory_mb / 1e3:.1f} GB of memory but jobs may use at most "
+                        f"{cap.memory_budget_mb / 1e3:.1f} GB on this machine "
+                        "(AERODOPPLER_JOBS_MEMORY_BUDGET_MB); it can never start"
+                    ),
+                ):
+                    out.append(job.id)
+        return out
+
     def _cancel_asked_at(self, job: Job) -> float | None:
         with self.queue._conn() as c:
             row = c.execute("SELECT cancel_requested_at FROM jobs WHERE id=?", (job.id,)).fetchone()
@@ -297,6 +317,7 @@ class Scheduler:
         self.escalate_cancellations()
         started = []
         cap = capacity_for(self.settings)
+        self.fail_oversized(cap)
         while (job := self.queue.claim_next(cap)) is not None:
             self.spawn(job)
             started.append(job.id)

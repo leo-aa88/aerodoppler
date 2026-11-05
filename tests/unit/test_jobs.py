@@ -312,3 +312,37 @@ def test_retry_recomputes_the_memory_reservation(tmp_path):
     )
     j2 = retry_job(s, q, j.id)
     assert j2.status == "queued" and j2.memory_mb > 6000
+
+
+def test_retry_refuses_a_job_that_no_longer_fits_the_budget(tmp_path):
+    """Regression: retry recomputed the reservation (6.7 GB for 2 h) without the budget check
+    that submission applies, so a 4 GB machine could re-queue a job that can never start."""
+    from aerodoppler.jobs.service import JobRejected, retry_job
+
+    s = Settings(data_dir=tmp_path, offline=True, jobs_memory_budget_mb=4000)
+    q = SqliteJobQueue(s.db_path)
+    j, _ = q.submit(
+        "spectrogram_generation",
+        {"recording_id": "r", "duration_s": 7200},
+        resource_class="light",
+        memory_mb=2099,
+    )
+    q.finish(j.id, None, "failed", error_message="memory budget exceeded")
+    with pytest.raises(JobRejected) as e:
+        retry_job(s, q, j.id)
+    assert e.value.code == "insufficient_memory"
+    assert q.get(j.id).status == "failed"  # not re-queued
+
+
+def test_oversized_queued_job_does_not_block_smaller_ones(tmp_path):
+    """An oversized job already in the queue (e.g. queued before the budget was lowered) must
+    not hold a head-of-line reservation, and the scheduler fails it with the reason."""
+    s = Settings(data_dir=tmp_path, offline=True, jobs_memory_budget_mb=1000)
+    q = SqliteJobQueue(s.db_path)
+    big, _ = _submit(q, mem=6700)  # older than the small one
+    small, _ = _submit(q, mem=100)
+    claimed = q.claim_next(Capacity({"light": 2}, 1000.0))
+    assert claimed is not None and claimed.id == small.id
+    Scheduler(s, q).fail_oversized(Capacity({"light": 2}, 1000.0))
+    j = q.get(big.id)
+    assert j.status == "failed" and j.error_code == "insufficient_memory"

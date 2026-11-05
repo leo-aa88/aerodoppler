@@ -283,4 +283,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    code = main()
+    # the final state is written: leave at once instead of a slow interpreter teardown (freeing
+    # GBs of arrays), so a finished job never overlaps with the next one admitted in its slot
+    sys.stdout.flush()
+    sys.stderr.flush()
+    logging.shutdown()
+    os._exit(code)

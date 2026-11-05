@@ -394,5 +394,14 @@ def retry_job(settings: Settings, queue: SqliteJobQueue, job_id: str) -> Job | N
     if j is None:
         return None
     jt = JOB_TYPES.get(j.type)
-    mem = jt.memory_mb(settings, j.params, shared_budget_mb(settings)) if jt else None
+    budget = shared_budget_mb(settings)
+    mem = jt.memory_mb(settings, j.params, budget) if jt else None
+    if mem is not None and mem > budget:
+        # same admission rule as submit_job: a job that can never fit is refused, not queued
+        raise JobRejected(
+            f"this {j.type.replace('_', ' ')} needs about {mem / 1e3:.1f} GB of memory but jobs may "
+            f"use at most {budget / 1e3:.1f} GB on this machine (AERODOPPLER_JOBS_MEMORY_BUDGET_MB); "
+            "it was not re-queued",
+            "insufficient_memory",
+        )
     return queue.requeue(job_id, memory_mb=mem)

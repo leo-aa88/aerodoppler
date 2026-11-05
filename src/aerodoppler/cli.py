@@ -732,9 +732,13 @@ def jobs_cancel(job_id: str) -> None:
 
 @jobs_app.command("retry")
 def jobs_retry(job_id: str) -> None:
-    from aerodoppler.jobs.service import queue_for, retry_job
+    from aerodoppler.jobs.service import JobRejected, queue_for, retry_job
 
-    j = retry_job(get_settings(), queue_for(get_settings()), job_id)
+    try:
+        j = retry_job(get_settings(), queue_for(get_settings()), job_id)
+    except JobRejected as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from e
     if j is None:
         typer.secho(
             "only failed, interrupted or cancelled worker jobs can be retried",
