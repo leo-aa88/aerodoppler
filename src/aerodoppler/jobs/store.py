@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS searches (
   id TEXT PRIMARY KEY, recording_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   status TEXT NOT NULL, stage TEXT, request_json TEXT NOT NULL, progress_json TEXT,
   result_dir TEXT, error TEXT, pid INTEGER, cancel_requested INTEGER NOT NULL DEFAULT 0,
-  cpu_seconds REAL, peak_rss_mb REAL
+  cpu_seconds REAL, peak_rss_mb REAL, pid_started_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_searches_rec ON searches(recording_id);
 CREATE TABLE IF NOT EXISTS audit (
@@ -50,6 +50,9 @@ class Store:
         self._lock = threading.Lock()
         with self._conn() as c:
             c.executescript(SCHEMA)
+            columns = {row["name"] for row in c.execute("PRAGMA table_info(searches)")}
+            if "pid_started_at" not in columns:
+                c.execute("ALTER TABLE searches ADD COLUMN pid_started_at REAL")
 
     @contextmanager
     def _conn(self):
@@ -202,6 +205,50 @@ class Store:
             },
         )
 
+    def create_search_if_capacity(
+        self,
+        search_id: str,
+        req: SearchRequest,
+        result_dir: Path,
+        max_active: int,
+    ) -> int | None:
+        """Atomically reserve a job slot, returning the active count when full."""
+        now = utc_now_iso()
+        with self._conn() as c:
+            c.execute("BEGIN IMMEDIATE")
+            row = c.execute(
+                "SELECT COUNT(*) AS n FROM searches WHERE status IN ('queued','running')"
+            ).fetchone()
+            active = int(row["n"])
+            if active >= max_active:
+                c.execute("ROLLBACK")
+                return active
+            c.execute(
+                "INSERT INTO searches(id, recording_id, created_at, updated_at, status, stage, request_json, progress_json, result_dir) VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    search_id,
+                    req.recording_id,
+                    now,
+                    now,
+                    "queued",
+                    "queued",
+                    req.model_dump_json(),
+                    json.dumps({}),
+                    str(result_dir),
+                ),
+            )
+            c.execute("COMMIT")
+        self.audit(
+            "search.create",
+            search_id,
+            {
+                "mode": str(req.mode),
+                "recording_id": req.recording_id,
+                "bbox": req.bbox.as_tuple() if req.bbox else None,
+            },
+        )
+        return None
+
     def update_search(self, search_id: str, **fields: Any) -> None:
         if not fields:
             return
@@ -256,6 +303,25 @@ class Store:
                 "SELECT COUNT(*) AS n FROM searches WHERE status IN ('running')"
             ).fetchone()
         return int(row["n"])
+
+    def list_active_searches(self) -> list[dict[str, Any]]:
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT id FROM searches WHERE status IN ('queued','running') ORDER BY created_at"
+            ).fetchall()
+        return [s for s in (self.get_search(r["id"]) for r in rows) if s]
+
+    def finish_if_active(self, search_id: str, status: str, stage: str, error: str) -> bool:
+        """Move an active job to a terminal state without overwriting worker completion."""
+        if status not in ("failed", "cancelled"):
+            raise ValueError(f"invalid terminal status: {status}")
+        with self._conn() as c:
+            n = c.execute(
+                "UPDATE searches SET status=?, stage=?, error=?, updated_at=? "
+                "WHERE id=? AND status IN ('queued','running')",
+                (status, stage, error, utc_now_iso(), search_id),
+            ).rowcount
+        return n > 0
 
     def delete_searches_for_recording(self, recording_id: str) -> list[Path]:
         with self._conn() as c:

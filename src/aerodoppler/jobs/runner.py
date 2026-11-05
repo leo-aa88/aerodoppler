@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,35 +32,120 @@ class JobRejected(RuntimeError):
 
 def submit_search(store: Store, settings: Settings, req: SearchRequest) -> str:
     """Create the job row and launch the worker subprocess (if under the concurrency cap)."""
-    active = store.count_active()
-    if active >= settings.max_concurrent_jobs:
+    reconcile_stale_jobs(store)
+    run_id = new_id("run")
+    out_dir = settings.runs_dir / run_id
+    active = store.create_search_if_capacity(run_id, req, out_dir, settings.max_concurrent_jobs)
+    if active is not None:
         raise JobRejected(
             f"{active} jobs already running (limit {settings.max_concurrent_jobs}); wait or cancel one"
         )
-    run_id = new_id("run")
-    out_dir = settings.runs_dir / run_id
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "request.json").write_text(req.model_dump_json(indent=2))
-    store.create_search(run_id, req, out_dir)
     env = dict(os.environ)
     env["AERODOPPLER_DATA_DIR"] = str(settings.data_dir)
     env["AERODOPPLER_OFFLINE"] = "true" if settings.offline else "false"
-    log_fh = open(out_dir / "job.log", "ab")
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "aerodoppler.jobs.runner", run_id],
-        env=env,
-        stdout=log_fh,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    store.update_search(run_id, pid=proc.pid, status="running", stage="starting")
+    log_fh = None
+    proc = None
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "request.json").write_text(req.model_dump_json(indent=2))
+        log_fh = open(out_dir / "job.log", "ab")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "aerodoppler.jobs.runner", run_id],
+            env=env,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        store.update_search(
+            run_id,
+            pid=proc.pid,
+            pid_started_at=_process_start_time(proc.pid),
+            status="running",
+            stage="starting",
+        )
+    except Exception as e:
+        if proc is not None and proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                proc.wait()
+            except OSError:
+                pass
+        if log_fh is not None:
+            log_fh.close()
+        store.finish_if_active(
+            run_id,
+            status="failed",
+            stage="launch_error",
+            error=f"worker could not be started: {type(e).__name__}: {e}",
+        )
+        raise
 
     def _reap() -> None:  # keep the handle so the child never becomes a zombie
-        proc.wait()
+        returncode = proc.wait()
         log_fh.close()
+        job = store.get_search(run_id)
+        if job and job["status"] in ("queued", "running"):
+            cancelled = job["cancel_requested"]
+            store.finish_if_active(
+                run_id,
+                status="cancelled" if cancelled else "failed",
+                stage="cancelled" if cancelled else "worker_exited",
+                error=(
+                    "cancelled by operator"
+                    if cancelled
+                    else f"worker exited before completing (exit code {returncode})"
+                ),
+            )
 
     threading.Thread(target=_reap, daemon=True).start()
     return run_id
+
+
+def _process_start_time(pid: int) -> float | None:
+    try:
+        return psutil.Process(pid).create_time()
+    except (psutil.Error, OSError):
+        return None
+
+
+def _job_process_alive(job: dict[str, Any]) -> bool:
+    pid = job.get("pid")
+    if not pid:
+        return False
+    try:
+        proc = psutil.Process(pid)
+        if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
+            return False
+        expected_start = job.get("pid_started_at")
+        return expected_start is None or abs(proc.create_time() - expected_start) < 1.0
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        return False
+    except psutil.AccessDenied:
+        # A local process we cannot inspect is safer to treat as active than to duplicate.
+        return True
+
+
+def reconcile_stale_jobs(store: Store, queued_grace_s: float = 60.0) -> list[str]:
+    """Fail active database rows whose worker no longer exists."""
+    reconciled: list[str] = []
+    now = time.time()
+    for job in store.list_active_searches():
+        stale = job["status"] == "running" and not _job_process_alive(job)
+        if job["status"] == "queued":
+            updated = datetime.fromisoformat(job["updated_at"].replace("Z", "+00:00"))
+            stale = now - updated.astimezone(UTC).timestamp() > queued_grace_s
+        if stale and store.finish_if_active(
+            job["id"],
+            status="failed",
+            stage="worker_lost",
+            error="worker process is no longer running; the job was interrupted",
+        ):
+            store.audit("search.reconciled", job["id"], {"previous_status": job["status"]})
+            reconciled.append(job["id"])
+    return reconciled
 
 
 def cancel_search(store: Store, run_id: str, grace_s: float = 5.0) -> bool:
@@ -68,16 +154,25 @@ def cancel_search(store: Store, run_id: str, grace_s: float = 5.0) -> bool:
         return False
     store.request_cancel(run_id)
     pid = job.get("pid")
+    if not _job_process_alive(job):
+        store.finish_if_active(
+            run_id,
+            status="cancelled",
+            stage="cancelled",
+            error="cancelled by operator; worker was no longer running",
+        )
+        return True
     if pid:
 
         def _escalate() -> None:
             time.sleep(grace_s)
             j = store.get_search(run_id)
-            if j and j["status"] == "running" and pid and psutil.pid_exists(pid):
-                try:
-                    os.killpg(os.getpgid(pid), signal.SIGTERM)
-                except Exception:
-                    pass
+            if j and j["status"] == "running":
+                if _job_process_alive(j):
+                    try:
+                        os.killpg(os.getpgid(pid), signal.SIGTERM)
+                    except OSError:
+                        pass
                 store.update_search(
                     run_id,
                     status="cancelled",
@@ -98,8 +193,23 @@ def run_search_inline(
     out_dir = settings.runs_dir / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
     store.create_search(run_id, req, out_dir)
-    store.update_search(run_id, status="running", stage="starting", pid=os.getpid())
-    return _execute(store, settings, req, run_id, out_dir, progress)
+    store.update_search(
+        run_id,
+        status="running",
+        stage="starting",
+        pid=os.getpid(),
+        pid_started_at=_process_start_time(os.getpid()),
+    )
+    try:
+        return _execute(store, settings, req, run_id, out_dir, progress)
+    except BaseException as e:
+        store.finish_if_active(
+            run_id,
+            status="failed",
+            stage="interrupted",
+            error=f"inline search interrupted: {type(e).__name__}: {e}",
+        )
+        raise
 
 
 def _execute(
