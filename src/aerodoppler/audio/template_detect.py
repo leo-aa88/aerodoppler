@@ -281,14 +281,86 @@ def remeasure_ridge(
     return np.array(out_t), np.array(out_f), np.array(out_z)
 
 
+def steady_tones_joined(
+    spec: Spectrogram,
+    t: NDArray[np.float64],
+    f: NDArray[np.float64],
+    z: NDArray[np.float64],
+    min_z: float = 3.0,
+    flat_frac: float = 0.015,
+) -> str | None:
+    """Detect a fake sweep made of two steady lines joined by a jump.
+
+    The template re-measurement follows the fitted curve inside a band, so it can step from one
+    steady line (e.g. the 2nd harmonic of a constant tone) to another (its fundamental) and
+    "measure" a large drop. A real pass sweeps continuously and its approach frequency is gone
+    after it has passed; here both lines are flat and at least one keeps sounding on the other
+    side of the jump. Returns a reason, or None when the points do not look like that."""
+    m = z >= min_z
+    if m.sum() < 10:
+        return None
+    tt, ff = t[m], f[m]
+    o = np.argsort(tt)
+    tt, ff = tt[o], ff[o]
+    j = int(np.argmax(np.abs(np.diff(ff))))
+    a, b = ff[: j + 1], ff[j + 1 :]
+    if len(a) < 3 or len(b) < 3:
+        return None
+    fa, fb = float(np.median(a)), float(np.median(b))
+    total = float(ff.max() - ff.min())
+    if total <= 0 or abs(fa - fb) < 0.6 * total:
+        return None
+    if (np.ptp(a) / fa > flat_frac) or (np.ptp(b) / fb > flat_frac):
+        return None
+
+    def level(freq: float, t0: float, t1: float) -> float:
+        ti = np.where((spec.times >= t0) & (spec.times <= t1))[0]
+        if ti.size == 0:
+            return 0.0
+        # a steady machine line wanders by a few tenths of a percent: look in ±1.5 %
+        fi = np.where(np.abs(spec.freqs - freq) <= max(1.0, 0.015 * freq))[0]
+        if fi.size == 0:
+            return 0.0
+        return float(np.median(spec.whitened[np.ix_(ti, fi)].max(axis=1)))
+
+    after_a = level(fa, float(tt[j + 1]), float(tt[-1]))  # does the first line continue?
+    before_b = level(fb, float(tt[0]), float(tt[j]))  # was the second line already there?
+    if after_a >= min_z or before_b >= min_z:
+        return (
+            f"two steady lines ({fa:.1f} Hz then {fb:.1f} Hz, ratio {fa / fb:.2f}) joined by a "
+            "jump while one of them keeps sounding: a constant source (e.g. its harmonics), "
+            "not a passing aircraft"
+        )
+    return None
+
+
 def flyovers_to_events(
-    spec: Spectrogram, fits: list[TemplateFit], recording_id: str, cfg: TemplateConfig | None = None
+    spec: Spectrogram,
+    fits: list[TemplateFit],
+    recording_id: str,
+    cfg: TemplateConfig | None = None,
+    rejected: list[dict] | None = None,
 ) -> list[DopplerEvent]:
     cfg = cfg or TemplateConfig()
     events = []
     for fit in fits:
         t, f, z = remeasure_ridge(spec, fit, cfg)
         if len(t) < 10:
+            continue
+        why = steady_tones_joined(spec, t, f, z)
+        if why:
+            if rejected is not None:
+                rejected.append(
+                    {
+                        "t_start_s": float(t[0]),
+                        "t_end_s": float(t[-1]),
+                        "f_mean_hz": float(np.mean(f)),
+                        "f_range_hz": float(np.ptp(f)),
+                        "mean_z": float(np.mean(z)),
+                        "reasons": ["steady_tones_joined"],
+                        "detail": why,
+                    }
+                )
             continue
         unc = np.clip(
             2.0 * spec.df_hz / np.sqrt(np.maximum(z, 1.0)), 0.25 * spec.df_hz, 4 * spec.df_hz

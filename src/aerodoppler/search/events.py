@@ -224,6 +224,23 @@ def assess_event(ev: DopplerEvent, c_mps: float = 343.0) -> dict:
     reasons: list[str] = []
     if len(pts) < 3:
         return {"label": "tonal_only", "reasons": ["fewer than three ridge points"], "metrics": {}}
+    ff = np.array([p.frequency_hz for p in pts])
+    lo, hi = float(ff.min()), float(ff.max())
+    if (hi - lo) / max(float(np.median(ff)), 1e-6) >= DOPPLER_MIN_EXCURSION:
+        between = int(np.sum((ff > lo + 0.2 * (hi - lo)) & (ff < hi - 0.2 * (hi - lo))))
+        if between < 3:
+            # a real pass sweeps through the intermediate frequencies; points only at two levels
+            # are a jump between steady lines (e.g. harmonics of one constant sound)
+            return {
+                "label": "tonal_only",
+                "reasons": [
+                    f"the frequency drop ({hi:.1f} → {lo:.1f} Hz) is never measured: {between} "
+                    "ridge point(s) between the two levels — a jump between steady lines (e.g. "
+                    "harmonics of a constant sound), not a continuous Doppler sweep"
+                ],
+                "metrics": {"n_points": len(pts), "points_in_transition": between},
+                "review": review,
+            }
     f = np.array([p.frequency_hz for p in pts], dtype=float)
     try:
         feat = measure_event(ev, c_mps)
