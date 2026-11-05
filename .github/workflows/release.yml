@@ -219,8 +219,10 @@ jobs:
 
   docker:
     name: Build Docker image
-    needs: version
-    if: ${{ always() && needs.version.result != 'failure' && needs.version.result != 'cancelled' }}
+    # after the wheel job: images are pushed to GHCR, so they must never be published for a
+    # release whose wheel build or smoke test failed (v0.2.3 was pushed that way)
+    needs: [version, build]
+    if: ${{ always() && needs.version.result != 'failure' && needs.version.result != 'cancelled' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
