@@ -143,6 +143,20 @@ class SearchCreateRequest(BaseModel):
     allow_synthetic_mix: bool = False
 
 
+class BlindSearchRequest(BaseModel):
+    """Search without an area: the scope is the extent of the selected flight datasets."""
+
+    mode: SearchMode
+    recording_id: str
+    event_ids: list[str] = Field(..., min_length=1, max_length=8)
+    date_utc: str | None = None
+    start_utc: str | None = None
+    start_uncertainty_s: float | None = Field(default=None, ge=0, le=86400)
+    flight_dataset_ids: list[str] = Field(default_factory=list)
+    budget_s: float = Field(default=3600.0, ge=60, le=86400)
+    allow_synthetic_mix: bool = False
+
+
 class SearchStatus(BaseModel):
     id: str
     recording_id: str

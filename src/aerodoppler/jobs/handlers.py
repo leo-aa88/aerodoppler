@@ -337,6 +337,54 @@ def _search_key(p: dict[str, Any]) -> str:
     )
 
 
+# ---- blind_search -------------------------------------------------------------------------
+
+
+def _run_blind_search(ctx: JobContext) -> dict[str, Any]:
+    """Search without a geographic area (scope = extent of the imported flight data)."""
+    from aerodoppler.resources import recommend_workers
+    from aerodoppler.search.blind import BlindConfig, run_blind_search
+    from aerodoppler.search.engine import SearchCancelled, SearchInputError
+
+    p = ctx.job.params
+    workers = int(p.get("workers") or 0) or recommend_workers(
+        float(ctx.memory_budget_mb or 4096.0), 250.0, base_mb=2000.0
+    )
+    cfg = BlindConfig(**{k: v for k, v in (p.get("config") or {}).items()})
+    try:
+        res = run_blind_search(
+            ctx.settings,
+            ctx.store,
+            recording_id=p["recording_id"],
+            event_ids=list(p["event_ids"]),
+            mode=p["mode"],
+            date_utc=p.get("date_utc"),
+            start_utc=p.get("start_utc"),
+            start_uncertainty_s=p.get("start_uncertainty_s"),
+            flight_dataset_ids=list(p.get("flight_dataset_ids") or []),
+            out_dir=ctx.work_dir / "blind",
+            cfg=cfg,
+            workers=workers,
+            progress=lambda stage, info: ctx.progress(
+                stage, info, min_interval_s=1.0 if stage == "engine" else 0.0
+            ),
+            should_cancel=ctx.should_cancel,
+            allow_synthetic_mix=bool(p.get("allow_synthetic_mix")),
+        )
+    except (SearchCancelled, KeyboardInterrupt) as e:
+        raise JobCancelled("cancelled by operator") from e
+    except (SearchInputError, ValueError) as e:
+        raise JobError(str(e), code="input_error") from e
+    v = res["verdict"]
+    return {
+        "status": "abstained" if v["answer"] == "abstain" else "succeeded",
+        "verdict": v,
+        "coverage": res["coverage"],
+        "scope_bbox": res["scope_bbox"],
+        "result_dir": str(ctx.work_dir / "blind"),
+    }
+
+
 # ---- benchmark ----------------------------------------------------------------------------
 
 
@@ -467,6 +515,15 @@ JOB_TYPES: dict[str, JobType] = {
         _search_memory,
         resume_safe=False,  # partial outputs are marked incomplete; retry is explicit
         idempotency=_search_key,
+        links=lambda p: (p.get("recording_id"), None),
+    ),
+    "blind_search": JobType(
+        "blind_search",
+        "analysis",
+        _run_blind_search,
+        _search_memory,
+        resume_safe=False,
+        idempotency=lambda p: "blind_search:" + _key(p),
         links=lambda p: (p.get("recording_id"), None),
     ),
     "benchmark": JobType(

@@ -63,11 +63,14 @@ the combination with a neutral score (archives miss aircraft) and cannot be comp
 the others. This removes the comb-like ambiguity created by pattern-work training aircraft,
 which can match any *two*-event separation but not three or four.
 
-Every stage records candidate counts. When more Mode A pairs exist than
-`quality_settings.max_assignments` (dense real traffic: 10⁷ CPA entries for 1,300 segments over
-a 29k-point grid), the pairs kept are those with the best *slant-distance consistency prior*
-(`|log(r_geom / d_est)|` per event with `d_est = f_c v² / (c |df/dt|)` from the flight's actual
-CPA speed), never simply the first ones in grid order; a warning is attached to the run.
+Every stage records candidate counts. Candidates are **ordered**, not cut: Mode A pairs and
+Mode B matches are sorted by a cheap *consistency prior* — the slant-distance prior
+`|log(r_geom / d_est)|` per event with `d_est = f_c v² / (c |df/dt|)` from the flight's actual
+CPA speed, plus the ridge-slope and aircraft-class terms — and the screen consumes them in that
+order (see the funnel below). `quality_settings.max_assignments` (20 M) is only a memory guard;
+when it bites, the most consistent are kept, a warning is attached and the search is reported
+incomplete. More flight segments than `max_segments` (20,000) make the search refuse with a
+request to narrow the area or time, instead of silently keeping the longest segments.
 
 ## Scoring (expensive stage) and the locked alignment
 
@@ -106,11 +109,40 @@ events with no ridge evidence, weighted by audibility and aircraft class, capped
 
 ## Search funnel
 
-With real traffic the number of Mode A pairs reaches 5·10⁵; the funnel is: ultra-coarse screen
-of **every** pair (2 harmonics, 3 f0 values, 4 s shift step, ≤150 curve samples, ~1.5 ms per
-pair) → top 40,000 → coarse (3 harmonics, 1.5 % f0 step, 2 s shifts) → top 400 → fine (full
-sweep, drift, silence) → top 5 distinct basins → 100 m / 25 m refinement. Candidate counts for
-every stage are reported with the result.
+With real traffic the number of Mode A pairs reaches 5·10⁵ and more. The funnel is: an
+**anytime** ultra-coarse screen (2 harmonics, 3 f0 values, 4 s shift step, ≤150 curve samples,
+~1.5 ms per pair) → top 40,000 → coarse (3 harmonics, 1.5 % f0 step, 2 s shifts) → top 400 →
+fine (full sweep, drift, silence) → top 5 distinct basins → 100 m / 25 m refinement.
+
+The ultra-coarse screen scores candidates in prior order, in batches, until everything is
+scored or `screen_budget_s` (default 1800 s, `--screen-budget-s`) is spent. The result records
+how many were scheduled and scored, why the screen stopped, the best score kept, the best in
+the last batch and the prior of the first unscored candidate. A screen stopped by its budget
+fails the `search_complete` gate (grade capped at low) with the note "NOT exhaustive: the
+screen scored X of Y…", so an unscored candidate is never mistaken for a rejected one. With
+the default budget every benchmark search so far scored all its candidates.
+
+## Search without an area (blind search, experimental)
+
+`aerodoppler blind-search` / `POST /api/searches/blind` take no area. The only geographic
+limit is the extent of the flight data imported for the day, reported as the *scope*:
+
+1. **Support.** Every eligible flight (propeller classes and unknown, below 3 km, speed within
+   the events' bounds) is decimated to one position per 20 s in DuckDB. Unknown time: positions
+   of two *different* aircraft whose times differ by the events' separation Δt (±20 s) and that
+   lie within 2 × 8 km of each other are joined (per-time-bin k-d trees); their midpoints mark
+   10 km cells, weighted by the number of distinct flight pairs. Known time: cells within 8 km
+   of an eligible aircraft at every event's time. This is a necessary condition, not evidence.
+2. **Coarse search.** Neighbouring cells merge into clusters, cut into ≤ 60 km tiles and
+   clipped to the scope; the normal engine searches each tile on a 1 km grid with a 120 s
+   screen budget, best supported first, until 65 % of the overall budget is used.
+3. **Refinement.** The two best tiles are searched again at 200 m within 10 km of their coarse
+   best point.
+
+Verdict: abstain when nothing is supported or nothing passes the engine's thresholds; else the
+best refined answer, graded low when another region scores within 0.5 z or when the budget
+stopped the coarse stage before every supported tile was searched. Scores of different tiles
+are compared as the same relative fit values; they are not calibrated across regions.
 
 ## Refinement, ranking, abstention
 

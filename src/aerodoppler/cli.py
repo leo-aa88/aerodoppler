@@ -563,6 +563,47 @@ def search_cmd(
     typer.echo(_summarize_result(res))
 
 
+@app.command("blind-search")
+def blind_search_cmd(
+    recording: str = typer.Option(..., "--recording"),
+    mode: str = typer.Option(..., "--mode", help="unknown-time | known-time"),
+    events: str = typer.Option(..., "--events", help="comma-separated event ids"),
+    date: str | None = typer.Option(None, "--date", help="UTC date for unknown-time mode"),
+    start_utc: str | None = typer.Option(None, "--start-utc", help="UTC start for known-time mode"),
+    start_uncertainty_s: float | None = typer.Option(None, "--start-uncertainty-s"),
+    datasets: str | None = typer.Option(
+        None, "--datasets", help="comma-separated dataset ids (default: every one of that day)"
+    ),
+    budget_s: float = typer.Option(3600.0, "--budget-s", help="overall time budget"),
+    workers: int = typer.Option(0, "--workers"),
+) -> None:
+    """Search WITHOUT an area: the scope is the extent of the imported flight data of the day.
+
+    Supported regions (where pairs of eligible aircraft passes fit the events) are searched
+    coarsely, best supported first, and the best are refined. The result says how much of the
+    supported area was searched; an incomplete or ambiguous search is graded low."""
+    from aerodoppler.jobs.queue import JobError
+    from aerodoppler.jobs.service import run_inline
+
+    params = {
+        "recording_id": recording,
+        "mode": mode,
+        "event_ids": [e for e in events.split(",") if e],
+        "date_utc": date,
+        "start_utc": start_utc,
+        "start_uncertainty_s": start_uncertainty_s,
+        "flight_dataset_ids": [d for d in (datasets or "").split(",") if d],
+        "workers": workers,
+        "config": {"budget_s": budget_s},
+    }
+    try:
+        _job, res = run_inline(get_settings(), "blind_search", params)
+    except JobError as e:
+        typer.secho(f"blind search failed: {e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from e
+    typer.echo(json.dumps(res, indent=2, default=str))
+
+
 def _summarize_result(res) -> str:
     out = {
         "run_id": res.run_id,
@@ -843,10 +884,17 @@ def benchmark(
         help="events per Mode A search in --real-trajectories (2 = pair; >2 = multi-event, experimental)",
     ),
     max_assignments: int = typer.Option(
-        200_000,
+        20_000_000,
         "--max-assignments",
-        help="cap on Mode A pairs per search (consistency-prior selection when exceeded)",
+        help="memory guard on Mode A pairs per search (the most consistent are kept when exceeded; the search is then reported incomplete)",
     ),
+    blind: str | None = typer.Option(
+        None,
+        "--blind",
+        help="dataset id: held-out BLIND benchmark (random observers, no area given to the search)",
+    ),
+    blind_cases: int = typer.Option(6, "--blind-cases"),
+    blind_budget_s: float = typer.Option(1800.0, "--blind-budget-s"),
 ) -> None:
     """Run the SYNTHETIC benchmark (default), the semi-synthetic real-trajectory benchmark, or a real-recording manifest benchmark."""
     import sys as _sys
@@ -861,7 +909,9 @@ def benchmark(
 
     s = get_settings()
     kind = (
-        "negatives"
+        "blind"
+        if blind
+        else "negatives"
         if negatives
         else "livermore"
         if livermore
@@ -877,7 +927,21 @@ def benchmark(
             typer.secho(m, err=True)
             ctx.check_cancel()  # Ctrl-C / SIGTERM / cancel from the Jobs page stop between steps
 
-        if negatives:
+        if blind:
+            from aerodoppler.validation.blind_benchmark import run_blind_benchmark
+
+            rep = run_blind_benchmark(
+                s,
+                blind,
+                out,
+                n_cases=blind_cases,
+                seed=int(seeds.split(",")[0]),
+                budget_s=blind_budget_s,
+                workers=workers,
+                log=echo,
+            )
+            rep = {**rep["summary"], "cases": rep["cases"]}
+        elif negatives:
             from aerodoppler.validation.negatives import run_negative_benchmark
 
             rep = run_negative_benchmark(s, out, workers=workers or 4, log=echo)
