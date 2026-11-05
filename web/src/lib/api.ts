@@ -1,6 +1,9 @@
 // Typed client for the local AeroDoppler API. Same-origin by default (FastAPI serves the
 // static export); NEXT_PUBLIC_API_BASE overrides for `next dev`.
-export const API_BASE: string = process.env.NEXT_PUBLIC_API_BASE ?? "";
+// `next dev` (port 3000) talks to the local API on 8000 by default; the production build is
+// served by that same API, so it uses relative URLs (same origin, any port).
+export const API_BASE: string =
+  process.env.NEXT_PUBLIC_API_BASE ?? (process.env.NODE_ENV === "development" ? "http://127.0.0.1:8000" : "");
 
 export interface Recording {
   id: string;

@@ -10,7 +10,6 @@ export default function ImportPage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  const [perm, setPerm] = useState(false);
   const [date, setDate] = useState("");
   const [startUtc, setStartUtc] = useState("");
   const [unc, setUnc] = useState("");
@@ -33,7 +32,6 @@ export default function ImportPage() {
     setErr(null);
     setMsg(null);
     if (!file) return setErr("choose a file");
-    if (!perm) return setErr("You must confirm that you own this recording or have the owner's permission.");
     const fd = new FormData();
     fd.append("file", file);
     fd.append("owner_permission_confirmed", "true");
@@ -73,9 +71,6 @@ export default function ImportPage() {
 
   return (
     <div>
-      <div className="banner warn">
-        <b>Authorization required.</b> Analyse only recordings you own or have the owner&apos;s explicit permission to analyse. This tool runs locally; nothing is uploaded. Results are hypotheses with uncalibrated relative scores.
-      </div>
       {err && <div className="banner danger">{err}</div>}
       {msg && <div className="banner ok">{msg}</div>}
       <div className="grid2">
@@ -105,12 +100,9 @@ export default function ImportPage() {
           </div>
           <div className="row" style={{ marginTop: 10 }}>
             <label>
-              <input type="checkbox" checked={perm} onChange={(e) => setPerm(e.target.checked)} /> <b>I own this recording or have the owner&apos;s explicit permission to analyse it.</b>
-            </label>
-            <label>
               <input type="checkbox" checked={synthetic} onChange={(e) => setSynthetic(e.target.checked)} /> label as SYNTHETIC DEMO data
             </label>
-            <button className="primary" disabled={busy || !file || !perm} onClick={upload}>
+            <button className="primary" disabled={busy || !file} onClick={upload}>
               {busy ? "working…" : "Ingest"}
             </button>
           </div>

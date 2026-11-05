@@ -117,7 +117,7 @@ class SearchCreateRequest(BaseModel):
     start_uncertainty_s: float | None = Field(default=None, ge=0, le=86400)
     bbox: BBox
     flight_dataset_ids: list[str] = Field(default_factory=list)
-    operator_authorized: bool
+    operator_authorized: bool = True
     national_scale_confirmed: bool = False
     max_cpu_hours: float | None = Field(default=1.0, gt=0, le=48)
     quality_settings: QualitySettings = Field(default_factory=QualitySettings)

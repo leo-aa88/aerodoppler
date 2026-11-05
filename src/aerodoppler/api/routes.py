@@ -76,7 +76,7 @@ def health(settings: Settings = Depends(get_settings_dep)) -> S.HealthResponse:
 @router.post("/api/recordings", response_model=S.RecordingCreateResponse, status_code=201)
 async def create_recording(
     file: UploadFile = File(...),
-    owner_permission_confirmed: bool = Form(False),
+    owner_permission_confirmed: bool = Form(True),
     recording_date_utc: str | None = Form(None),
     start_time_utc: str | None = Form(None),
     start_time_uncertainty_s: float | None = Form(None),
@@ -85,10 +85,6 @@ async def create_recording(
     settings: Settings = Depends(get_settings_dep),
     store: Store = Depends(get_store_dep),
 ) -> S.RecordingCreateResponse:
-    if not owner_permission_confirmed:
-        raise HTTPException(
-            status_code=403, detail="owner_permission_confirmed must be true: " + AUTH_NOTICE
-        )
     name = safe_filename(file.filename or "upload.wav")
     limit = settings.max_upload_mb * 1024 * 1024
     with tempfile.TemporaryDirectory() as td:
@@ -121,6 +117,11 @@ async def create_recording(
         except AudioDecodeError as e:
             raise HTTPException(status_code=422, detail=f"audio could not be decoded: {e}") from e
     warnings = []
+    if rec.truncated:
+        warnings.append(
+            f"recording exceeded the {settings.max_audio_duration_s:.0f} s limit; "
+            "only the beginning was included in the analysis copy"
+        )
     if not rec.recording_date_utc and not rec.start_time_utc:
         warnings.append(
             "no recording date/time supplied: a search will need --date (unknown-time) or --start-utc (known-time)"
@@ -355,10 +356,6 @@ def create_search(
     settings: Settings = Depends(get_settings_dep),
     store: Store = Depends(get_store_dep),
 ) -> S.SearchStatus:
-    if not body.operator_authorized:
-        raise HTTPException(
-            status_code=403, detail="operator_authorized must be true: " + AUTH_NOTICE
-        )
     rec = store.get_recording(_safe_id(body.recording_id, "recording"))
     if rec is None:
         raise HTTPException(status_code=404, detail="recording not found")

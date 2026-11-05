@@ -6,10 +6,10 @@ why it must not be pointed at other people's recordings.
 
 ## What the software enforces
 
-* **Authorization acknowledgement** — every CLI command that ingests a recording or runs a
-  search needs `--authorized`; the API needs `owner_permission_confirmed=true` /
-  `operator_authorized=true`; the UI has the corresponding checkboxes. Requests without it are
-  rejected (HTTP 403 / exit code 2).
+* **Authorization is the operator's responsibility, not a software gate.** Earlier versions
+  required `--authorized` on the CLI, `owner_permission_confirmed` / `operator_authorized` in
+  the API and matching UI checkboxes; those fields are still accepted but no longer enforced.
+  Analyse only recordings you own or have the owner's explicit permission to analyse.
 * **Localhost only** — `aerodoppler serve` binds to 127.0.0.1. Binding elsewhere logs a
   warning; put an authenticating reverse proxy in front if you must. The Docker compose file
   publishes the port on 127.0.0.1 only.

@@ -34,6 +34,8 @@ class DecodedAudio:
     sha256: str
     decoder: str
     original_filename: str
+    source_duration_s: float | None = None
+    truncated: bool = False
 
 
 def ffmpeg_binary() -> str | None:
@@ -73,17 +75,23 @@ def decode_audio(path: Path, max_duration_s: float | None = None) -> DecodedAudi
     if ext in SNDFILE_EXT:
         try:
             info = sf.info(str(path))
-            if max_duration_s is not None and info.duration > max_duration_s:
-                raise AudioDecodeError(
-                    f"audio duration {info.duration:.0f} s exceeds limit {max_duration_s:.0f} s"
-                )
-            data, sr = sf.read(str(path), dtype="float32", always_2d=True)
+            truncated = max_duration_s is not None and info.duration > max_duration_s
+            frames = int(max_duration_s * info.samplerate) if truncated else -1
+            data, sr = sf.read(str(path), frames=frames, dtype="float32", always_2d=True)
         except AudioDecodeError:
             raise
         except Exception as e:
             raise AudioDecodeError(f"libsndfile failed on {path.name}: {e}") from e
         return DecodedAudio(
-            data, int(sr), data.shape[1], data.shape[0] / sr, digest, "libsndfile", path.name
+            data,
+            int(sr),
+            data.shape[1],
+            data.shape[0] / sr,
+            digest,
+            "libsndfile",
+            path.name,
+            source_duration_s=info.duration,
+            truncated=truncated,
         )
     ff = ffmpeg_binary()
     if ff is None:
@@ -91,8 +99,7 @@ def decode_audio(path: Path, max_duration_s: float | None = None) -> DecodedAudi
             "ffmpeg not available: install ffmpeg or `pip install imageio-ffmpeg`"
         )
     dur = ffprobe_duration(path)
-    if max_duration_s is not None and dur is not None and dur > max_duration_s:
-        raise AudioDecodeError(f"media duration {dur:.0f} s exceeds limit {max_duration_s:.0f} s")
+    truncated = max_duration_s is not None and dur is not None and dur > max_duration_s
     # Probe stream parameters first so the native sample rate/channel count are preserved.
     sr, ch = _probe_stream(path)
     cmd = [
@@ -102,21 +109,27 @@ def decode_audio(path: Path, max_duration_s: float | None = None) -> DecodedAudi
         "-nostdin",
         "-i",
         str(path),
-        "-vn",
-        "-map",
-        "0:a:0",
-        "-ac",
-        str(ch),
-        "-ar",
-        str(sr),
-        "-f",
-        "f32le",
-        "-acodec",
-        "pcm_f32le",
-        "pipe:1",
     ]
     if max_duration_s is not None:
-        cmd = cmd[:5] + ["-t", str(max_duration_s + 1)] + cmd[5:]
+        # This is an output duration cap, so it must follow the input path.  Putting it
+        # between ``-i`` and the path makes FFmpeg interpret ``-t`` as the input filename.
+        cmd.extend(["-t", str(max_duration_s)])
+    cmd.extend(
+        [
+            "-vn",
+            "-map",
+            "0:a:0",
+            "-ac",
+            str(ch),
+            "-ar",
+            str(sr),
+            "-f",
+            "f32le",
+            "-acodec",
+            "pcm_f32le",
+            "pipe:1",
+        ]
+    )
     try:
         proc = subprocess.run(cmd, capture_output=True, timeout=3600)
     except subprocess.TimeoutExpired as e:
@@ -127,11 +140,22 @@ def decode_audio(path: Path, max_duration_s: float | None = None) -> DecodedAudi
         )
     arr = np.frombuffer(proc.stdout, dtype=np.float32)
     arr = arr[: (len(arr) // ch) * ch].reshape(-1, ch)
-    if max_duration_s is not None and arr.shape[0] / sr > max_duration_s:
-        raise AudioDecodeError(
-            f"audio duration {arr.shape[0] / sr:.0f} s exceeds limit {max_duration_s:.0f} s"
-        )
-    return DecodedAudio(arr.copy(), sr, ch, arr.shape[0] / sr, digest, "ffmpeg", path.name)
+    if max_duration_s is not None:
+        max_frames = int(max_duration_s * sr)
+        if dur is None and arr.shape[0] >= max_frames:
+            truncated = True
+        arr = arr[:max_frames]
+    return DecodedAudio(
+        arr.copy(),
+        sr,
+        ch,
+        arr.shape[0] / sr,
+        digest,
+        "ffmpeg",
+        path.name,
+        source_duration_s=dur,
+        truncated=truncated,
+    )
 
 
 def _probe_stream(path: Path) -> tuple[int, int]:

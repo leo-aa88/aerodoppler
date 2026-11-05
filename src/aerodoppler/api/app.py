@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -43,6 +44,14 @@ def create_app(settings: Settings | None = None, web_dir: Path | None = None) ->
     app.state.settings = settings
     app.state.store = Store(settings.db_path)
     app.include_router(router)
+    # The Next.js dev server (`make web-dev`) runs on a different origin from the API; allow
+    # browser calls from localhost on any port and nothing else. The built UI is same-origin.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$",
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.middleware("http")
     async def _no_external_leak_headers(request: Request, call_next):

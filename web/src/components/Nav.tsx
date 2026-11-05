@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { API_BASE, api } from "@/lib/api";
 
 const links = [
   ["/", "Import"],
@@ -29,7 +29,7 @@ export function Nav() {
       ))}
       <span className="spacer" />
       <span className="muted small">
-        {health ? `local API v${health.version} on ${health.host}${health.offline ? " · OFFLINE" : ""}` : err ? `API unreachable: ${err}` : "connecting…"}
+        {health ? `local API v${health.version} on ${health.host}${health.offline ? " · OFFLINE" : ""}` : err ? `API not reachable at ${API_BASE || (typeof window !== "undefined" ? window.location.origin : "")} (${err}) — start it with \`make serve\`` : "connecting…"}
       </span>
     </nav>
   );

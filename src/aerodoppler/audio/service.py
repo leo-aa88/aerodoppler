@@ -32,7 +32,7 @@ def ingest_recording(
     settings: Settings,
     path: Path,
     *,
-    owner_permission_confirmed: bool,
+    owner_permission_confirmed: bool = True,
     recording_date_utc: str | None = None,
     start_time_utc: str | None = None,
     start_time_uncertainty_s: float | None = None,
@@ -40,10 +40,6 @@ def ingest_recording(
     notes: str | None = None,
     keep_original: bool = True,
 ) -> Recording:
-    if not owner_permission_confirmed:
-        raise AuthorizationRequired(
-            "owner permission must be confirmed before a recording is ingested"
-        )
     size_mb = Path(path).stat().st_size / 1e6
     if size_mb > settings.max_upload_mb:
         raise AudioDecodeError(f"file is {size_mb:.0f} MB; limit is {settings.max_upload_mb} MB")
@@ -67,6 +63,8 @@ def ingest_recording(
         duration_s=dec.duration_s,
         sample_rate_hz=dec.sample_rate_hz,
         channels=dec.channels,
+        source_duration_s=dec.source_duration_s,
+        truncated=dec.truncated,
         start_time_utc=start_time_utc,
         start_time_uncertainty_s=start_time_uncertainty_s,
         recording_date_utc=recording_date_utc or (start_time_utc[:10] if start_time_utc else None),
@@ -81,6 +79,8 @@ def ingest_recording(
                 "decoder": dec.decoder,
                 "analysis_rate_hz": settings.analysis_sample_rate_hz,
                 "original_kept": keep_original,
+                "source_duration_s": dec.source_duration_s,
+                "truncated": dec.truncated,
             },
             indent=2,
         )

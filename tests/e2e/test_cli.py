@@ -18,7 +18,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
     return {"AERODOPPLER_DATA_DIR": str(tmp_path / "data"), "AERODOPPLER_OFFLINE": "true"}
 
 
-def test_cli_requires_authorization_for_ingest_and_search(tmp_path: Path, monkeypatch):
+def test_cli_ingest_without_authorization_flag_and_purge(tmp_path: Path, monkeypatch):
     for k, v in _env(tmp_path).items():
         monkeypatch.setenv(k, v)
     from aerodoppler.config import reset_settings_cache
@@ -28,31 +28,13 @@ def test_cli_requires_authorization_for_ingest_and_search(tmp_path: Path, monkey
     sf.write(
         str(wav), np.random.default_rng(0).standard_normal(8000 * 10).astype(np.float32) * 0.1, 8000
     )
-    r = CliRunner().invoke(app, ["audio", "ingest", str(wav), "--date", "2026-11-02"])
-    assert r.exit_code == 2 and "AUTHORIZATION REQUIRED" in (
-        r.output + (r.stderr if hasattr(r, "stderr") else "")
-    )
+    # --authorized is no longer required (still accepted as a no-op).
     r = CliRunner().invoke(
-        app, ["audio", "ingest", str(wav), "--date", "2026-11-02", "--authorized", "--synthetic"]
+        app, ["audio", "ingest", str(wav), "--date", "2026-11-02", "--synthetic"]
     )
     assert r.exit_code == 0, r.output
     rec = json.loads(r.output[r.output.index("{") :])
     assert rec["owner_permission_confirmed"] is True and rec["duration_s"] == 10.0
-    r = CliRunner().invoke(
-        app,
-        [
-            "search",
-            "--recording",
-            rec["id"],
-            "--mode",
-            "known-time",
-            "--events",
-            "x",
-            "--bbox",
-            "-1,-1,1,1",
-        ],
-    )
-    assert r.exit_code == 2  # no --authorized
     r = CliRunner().invoke(app, ["audio", "purge", rec["id"]])
     assert r.exit_code == 2  # needs --yes
     r = CliRunner().invoke(app, ["audio", "purge", rec["id"], "--yes"])

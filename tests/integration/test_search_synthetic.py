@@ -214,15 +214,3 @@ def test_missing_dem_is_an_explicit_error(world, tmp_path: Path):
     )
     res = run_search_inline(w["store"], s2, req2)
     assert res.abstention.abstained and any("flat ground" in wmsg for wmsg in res.warnings)
-
-
-def test_unauthorized_request_rejected(world):
-    with pytest.raises(ValueError, match="operator_authorized"):
-        SearchRequest(
-            mode=SearchMode.UNKNOWN_TIME,
-            recording_id="x",
-            event_ids=["a", "b"],
-            date_utc="2026-09-08",
-            bbox=BBox(west=-75.2, south=39.9, east=-74.8, north=40.1),
-            operator_authorized=False,
-        )

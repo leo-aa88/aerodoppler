@@ -37,6 +37,12 @@ make web-install && make web-build   # optional UI (Next.js static export)
 make serve              # http://127.0.0.1:8000  (API docs at /docs)
 ```
 
+`make serve` is the whole application: the API plus the built UI on one port. Open
+http://127.0.0.1:8000. If the UI has not been built, that address answers with a JSON note
+saying so. `make web-dev` is only for working on the frontend: it starts Next.js with hot
+reload on http://localhost:3000 and talks to the API on 8000, so run `make serve` in another
+terminal first (set `NEXT_PUBLIC_API_BASE` to point it elsewhere).
+
 `make demo` generates two synthetic propeller flights plus distractors, a synthetic DEM, a 25-min
 recording synthesised with an independent retarded-time simulator, ingests it, auto-detects the
 Doppler events, runs an unknown-time (Mode A) and a known-time (Mode B) search and writes plots
@@ -86,7 +92,7 @@ docker run --rm -p 127.0.0.1:8000:8000 -v "$PWD/data:/data" ghcr.io/leo-aa88/aer
    UTC start time with its uncertainty (known-time mode).
 
    ```bash
-   uv run aerodoppler audio ingest ./my_recording.wav --date 2026-11-02 --authorized
+   uv run aerodoppler audio ingest ./my_recording.wav --date 2026-11-02
    uv run aerodoppler audio spectrogram <recording-id> --png spec.png
    uv run aerodoppler audio detect <recording-id>          # editable proposals
    uv run aerodoppler audio add-event <recording-id> --points "120:95.2,150:93.0,190:84.1,230:80.3" --harmonic 1
@@ -95,8 +101,8 @@ docker run --rm -p 127.0.0.1:8000:8000 -v "$PWD/data:/data" ghcr.io/leo-aa88/aer
 3. **Search** (bounded bbox; large areas need `--confirm-large-scale`):
 
    ```bash
-   uv run aerodoppler search --recording <id> --mode unknown-time --date 2026-11-02 --bbox -81.3,28.9,-81.0,29.2 --events <id1>,<id2> --authorized
-   uv run aerodoppler search --recording <id> --mode known-time --start-utc 2026-11-02T15:04:00Z --start-uncertainty-s 10 --bbox -81.3,28.9,-81.0,29.2 --events <id1> --authorized
+   uv run aerodoppler search --recording <id> --mode unknown-time --date 2026-11-02 --bbox -81.3,28.9,-81.0,29.2 --events <id1>,<id2>
+   uv run aerodoppler search --recording <id> --mode known-time --start-utc 2026-11-02T15:04:00Z --start-uncertainty-s 10 --bbox -81.3,28.9,-81.0,29.2 --events <id1>
    uv run aerodoppler results export <run-id> --format geojson
    ```
 

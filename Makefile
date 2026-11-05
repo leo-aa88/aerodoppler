@@ -26,7 +26,8 @@ test-offline:
 demo:
 	AERODOPPLER_OFFLINE=true $(UV) run aerodoppler demo --out data/runs/demo
 
-serve:
+serve:  # API + UI on http://127.0.0.1:8000; builds the UI first if it is missing and npm exists
+	@if [ ! -f web/out/index.html ] && command -v npm >/dev/null 2>&1; then $(MAKE) web-install web-build; fi
 	$(UV) run aerodoppler serve --host 127.0.0.1 --port 8000
 
 web-install:
@@ -35,7 +36,7 @@ web-install:
 web-build:
 	cd web && npm run build
 
-web-dev:
+web-dev:  # hot-reload UI on http://localhost:3000; needs `make serve` running for the API
 	cd web && npm run dev
 
 docker-build:

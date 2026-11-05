@@ -156,10 +156,12 @@ class Recording(BaseModel):
     duration_s: float
     sample_rate_hz: int
     channels: int
+    source_duration_s: float | None = None
+    truncated: bool = False
     start_time_utc: str | None = None
     start_time_uncertainty_s: float | None = None
     recording_date_utc: str | None = None
-    owner_permission_confirmed: bool
+    owner_permission_confirmed: bool = True
     created_at: str = Field(default_factory=utc_now_iso)
     synthetic: bool = False
     notes: str | None = None
@@ -246,7 +248,7 @@ class SearchRequest(BaseModel):
     start_uncertainty_s: float | None = None
     bbox: BBox | None = None
     flight_dataset_ids: list[str] = Field(default_factory=list)
-    operator_authorized: bool = False
+    operator_authorized: bool = True
     national_scale_confirmed: bool = False
     max_cpu_hours: float | None = 1.0
     quality_settings: QualitySettings = Field(default_factory=QualitySettings)
@@ -254,10 +256,6 @@ class SearchRequest(BaseModel):
 
     @model_validator(mode="after")
     def _mode_requirements(self) -> SearchRequest:
-        if not self.operator_authorized:
-            raise ValueError(
-                "operator_authorized must be true: confirm you own or have permission to analyze this recording"
-            )
         if self.mode == SearchMode.UNKNOWN_TIME:
             if not self.date_utc:
                 raise ValueError("unknown-time mode requires date_utc")

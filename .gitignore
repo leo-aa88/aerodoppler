@@ -27,3 +27,5 @@ web/next-env.d.ts
 # scratch
 *.log
 web/tsconfig.tsbuildinfo
+# written by `next dev` on every start
+web/AGENTS.md

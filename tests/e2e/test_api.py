@@ -38,17 +38,6 @@ def test_health_and_privacy_defaults(api):
     assert r.headers["Referrer-Policy"] == "no-referrer"
 
 
-def test_upload_requires_permission(api):
-    wav = Path(api["sc"].wav_path)
-    with open(wav, "rb") as fh:
-        r = api["client"].post(
-            "/api/recordings",
-            files={"file": (wav.name, fh, "audio/wav")},
-            data={"owner_permission_confirmed": "false"},
-        )
-    assert r.status_code == 403
-
-
 def test_full_flow(api):
     c = api["client"]
     sc = api["sc"]
@@ -109,11 +98,8 @@ def test_full_flow(api):
         "event_ids": [auto[0]["id"], auto[1]["id"]],
         "date_utc": spec.date_utc,
         "bbox": spec.bbox.model_dump(),
-        "operator_authorized": False,
     }
-    assert c.post("/api/searches", json=body).status_code == 403
     # real search job (subprocess)
-    body["operator_authorized"] = True
     body["quality_settings"] = {"workers": 4}
     r = c.post("/api/searches", json=body)
     assert r.status_code == 202, r.text

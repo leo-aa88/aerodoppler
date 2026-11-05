@@ -1,7 +1,8 @@
 """AeroDoppler command-line interface (SPEC §11).
 
-Every command that touches a recording or produces a location requires ``--authorized``:
-the operator confirms they own the recording or have the owner's permission to analyse it.
+``--authorized`` is still accepted by ``audio ingest`` and ``search`` for compatibility but is
+no longer required; analysing only recordings you own or may analyse is the operator's
+responsibility (see docs/privacy.md).
 """
 
 from __future__ import annotations
@@ -30,18 +31,6 @@ app.add_typer(flights_app, name="flights")
 app.add_typer(geo_app, name="geo")
 app.add_typer(audio_app, name="audio")
 app.add_typer(results_app, name="results")
-
-AUTH_TEXT = (
-    "AUTHORIZATION REQUIRED: AeroDoppler analyses recordings only with the recording owner's "
-    "permission. Pass --authorized to confirm you own this recording or have explicit permission "
-    "to analyse it. Locations are hypotheses with uncalibrated relative scores, not facts."
-)
-
-
-def _require_auth(authorized: bool) -> None:
-    if not authorized:
-        typer.secho(AUTH_TEXT, fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=2)
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -258,8 +247,8 @@ def _store():
 def audio_ingest(
     path: Path = typer.Argument(..., exists=True, readable=True),
     authorized: bool = typer.Option(
-        False, "--authorized", help="I own this recording or have the owner's permission"
-    ),
+        False, "--authorized", hidden=True
+    ),  # no-op, kept for compatibility
     date: str | None = typer.Option(None, "--date", help="UTC recording date YYYY-MM-DD (Mode A)"),
     start_utc: str | None = typer.Option(
         None, "--start-utc", help="UTC start time, e.g. 2026-09-08T14:03:00Z (Mode B)"
@@ -272,7 +261,7 @@ def audio_ingest(
     from aerodoppler.audio.decode import AudioDecodeError
     from aerodoppler.audio.service import ingest_recording
 
-    _require_auth(authorized)
+    del authorized
     try:
         rec = ingest_recording(
             _store(),
@@ -476,7 +465,9 @@ def search_cmd(
     datasets: str | None = typer.Option(
         None, "--datasets", help="comma-separated dataset ids (default: all)"
     ),
-    authorized: bool = typer.Option(False, "--authorized"),
+    authorized: bool = typer.Option(
+        False, "--authorized", hidden=True
+    ),  # no-op, kept for compatibility
     national_scale_confirmed: bool = typer.Option(False, "--confirm-large-scale"),
     workers: int = typer.Option(0, "--workers"),
     grid_m: float = typer.Option(200.0, "--grid-m"),
@@ -495,7 +486,7 @@ def search_cmd(
     from aerodoppler.models import QualitySettings, SearchMode, SearchRequest
     from aerodoppler.search.engine import SearchCancelled, SearchInputError
 
-    _require_auth(authorized)
+    del authorized
     s = get_settings()
     if offline and not s.offline:
         reset_settings_cache()
@@ -660,7 +651,6 @@ def serve(
     """Start the local API + UI server (localhost by default)."""
     from aerodoppler.api.app import run_server
 
-    typer.secho(AUTH_TEXT, fg=typer.colors.YELLOW, err=True)
     run_server(host, port, reload)
 
 

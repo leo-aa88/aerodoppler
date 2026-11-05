@@ -21,7 +21,6 @@ function SearchSetup() {
   const [startUtc, setStartUtc] = useState("");
   const [unc, setUnc] = useState("60");
   const [dsSel, setDsSel] = useState<string[]>([]);
-  const [auth, setAuth] = useState(false);
   const [largeScale, setLargeScale] = useState(false);
   const [cpuHours, setCpuHours] = useState("1");
   const [grid, setGrid] = useState("200");
@@ -84,7 +83,6 @@ function SearchSetup() {
     setErr(null);
     const parts = bbox.split(",").map((s) => parseFloat(s.trim()));
     if (parts.length !== 4 || parts.some(Number.isNaN)) return setErr("bbox must be WEST,SOUTH,EAST,NORTH");
-    if (!auth) return setErr("Confirm authorization first.");
     if (mode === "unknown-time" && sel.length < 2) return setErr("Mode A needs two events.");
     if (mode === "known-time" && sel.length < 1) return setErr("Mode B needs at least one event.");
     const q: Record<string, unknown> = { coarse_grid_m: +grid, event_separation_tolerance_s: +tol, alignment_sweep_s: +sweep, workers: +workers, silence_constraint: silence };
@@ -219,12 +217,9 @@ function SearchSetup() {
           </div>
           <div className="row" style={{ marginTop: 12 }}>
             <label>
-              <input type="checkbox" checked={auth} onChange={(e) => setAuth(e.target.checked)} /> <b>I am authorized to analyse this recording and locate where it was made.</b>
-            </label>
-            <label>
               <input type="checkbox" checked={largeScale} onChange={(e) => setLargeScale(e.target.checked)} /> confirm large-scale (regional/national) search — slow and resource intensive
             </label>
-            <button className="primary" disabled={busy || !auth} onClick={submit}>
+            <button className="primary" disabled={busy} onClick={submit}>
               {busy ? "submitting…" : "Run search"}
             </button>
           </div>
