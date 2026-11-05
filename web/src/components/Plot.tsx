@@ -27,7 +27,7 @@ export function Plot({ data, layout, onClick, className, style }: PlotProps) {
     let cancelled = false;
     loadPlotly().then((Plotly) => {
       if (cancelled || !ref.current) return;
-      Plotly.react(el, data, { paper_bgcolor: "#171d24", plot_bgcolor: "#0b0f14", font: { color: "#e6edf3", size: 12 }, margin: { l: 60, r: 20, t: 40, b: 50 }, ...layout }, { responsive: true, displaylogo: false });
+      Plotly.react(el, data, { paper_bgcolor: "#171d24", plot_bgcolor: "#0b0f14", font: { color: "#e6edf3", size: 12 }, margin: { l: 60, r: 20, t: 40, b: 50 }, ...layout, xaxis: { automargin: true, ...layout.xaxis }, yaxis: { automargin: true, ...layout.yaxis } }, { responsive: true, displaylogo: false });
       const handler = (ev: Plotly.PlotMouseEvent) => {
         const p = ev.points?.[0];
         if (p && clickRef.current) clickRef.current(Number(p.x), Number(p.y));
@@ -38,5 +38,7 @@ export function Plot({ data, layout, onClick, className, style }: PlotProps) {
       cancelled = true;
     };
   }, [data, layout]);
-  return <div ref={ref} className={className ?? "plot"} style={style} />;
+  // The container must be exactly as tall as the figure, otherwise the bottom of the figure
+  // (axis titles) spills over whatever follows the plot.
+  return <div ref={ref} className={className ?? "plot"} style={{ ...(layout.height ? { height: layout.height } : {}), ...style }} />;
 }

@@ -108,7 +108,7 @@ function Lab() {
     return traces;
   }, [spec, events, draft, vmin, vmax, layer, showHarmonics, selected]);
 
-  const layout = useMemo<Partial<Plotly.Layout>>(() => ({ title: { text: recording ? `${recording.synthetic ? "SYNTHETIC DEMO — " : ""}${recording.original_filename} · ${layer} spectrogram` : "" }, xaxis: { title: { text: "recording time (s)" } }, yaxis: { title: { text: "frequency (Hz)" } }, legend: { orientation: "h", y: -0.2 }, height: 560 }), [recording, layer]);
+  const layout = useMemo<Partial<Plotly.Layout>>(() => ({ xaxis: { title: { text: "recording time (s)" } }, yaxis: { title: { text: "frequency (Hz)" } }, legend: { orientation: "h", x: 0, y: 1.02, xanchor: "left", yanchor: "bottom" }, margin: { l: 60, r: 20, t: 36, b: 50 }, height: 560 }), [recording, layer]);
 
   const onClick = (x: number, y: number) => {
     if (!drawing) return;
@@ -210,6 +210,12 @@ function Lab() {
             {recording ? `${recording.duration_s.toFixed(0)} s · analysis 2 kHz · ${spec ? `view pooled ${spec.pooled[0]}×${spec.pooled[1]}` : ""}` : ""}
           </span>
         </div>
+        {recording && (
+          <div className="plot-title" title={recording.original_filename}>
+            {recording.synthetic ? "SYNTHETIC DEMO — " : ""}
+            {recording.original_filename} · {layer} spectrogram
+          </div>
+        )}
         <Plot data={data} layout={layout} onClick={onClick} />
         <div className="row" style={{ marginTop: 8 }}>
           <button onClick={() => setDrawing((d) => !d)} className={drawing ? "primary" : ""}>
