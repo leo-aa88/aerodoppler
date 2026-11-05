@@ -386,3 +386,13 @@ def migrate_legacy_jobs(settings: Settings, queue: SqliteJobQueue) -> int:
             n += 1
     queue.record_migration(_LEGACY_MIGRATION, f"copied {n} legacy search/import rows into jobs")
     return n
+
+
+def retry_job(settings: Settings, queue: SqliteJobQueue, job_id: str) -> Job | None:
+    """Re-queue a terminal worker job with its memory reservation recomputed."""
+    j = queue.get(job_id)
+    if j is None:
+        return None
+    jt = JOB_TYPES.get(j.type)
+    mem = jt.memory_mb(settings, j.params, shared_budget_mb(settings)) if jt else None
+    return queue.requeue(job_id, memory_mb=mem)

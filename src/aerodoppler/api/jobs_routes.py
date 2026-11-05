@@ -283,7 +283,9 @@ def retry_job(job_id: str, request: Request) -> dict[str, Any]:
         raise api_error(
             409, "not_retryable", "inline CLI jobs are retried by running the command again"
         )
-    j2 = q.requeue(job_id)
+    from aerodoppler.jobs.service import retry_job as _retry
+
+    j2 = _retry(request.app.state.settings, q, job_id)
     assert j2 is not None
     return job_view(j2)
 

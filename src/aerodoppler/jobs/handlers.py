@@ -264,10 +264,14 @@ def _ingest_memory(s: Settings, p: dict[str, Any], budget: float) -> float:
 
 
 def _rec_memory(s: Settings, p: dict[str, Any], budget: float) -> float:
+    """Spectrogram / detection peak memory. Measured 2026-11-05 on 2 kHz audio with the default
+    STFT (0.25 s hop, 900 Hz, 4.096 s window): 1.6 GB for 30 min, 3.1 GB for 60 min, 6.0 GB for
+    120 min — about 56 bytes per spectrogram cell (several float64 working arrays). 60 bytes per
+    cell plus 300 MB of runtime keeps a margin."""
     dur = float(p.get("duration_s") or s.max_audio_duration_s)
     frames = dur / s.stft_hop_s
     bins = s.max_analysis_freq_hz * s.stft_window_s
-    return max(512.0, 400.0 + 4.0 * frames * bins * 4 / 1e6)
+    return max(512.0, 300.0 + 60.0 * frames * bins / 1e6)
 
 
 def _run_spectrogram(ctx: JobContext) -> dict[str, Any]:

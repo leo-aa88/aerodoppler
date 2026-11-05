@@ -642,10 +642,16 @@ class SqliteJobQueue:
             out = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         return Job.from_row(out)
 
-    def requeue(self, job_id: str) -> Job | None:
-        """Manual retry of a terminal job (failed/interrupted/cancelled): same id and history."""
+    def requeue(self, job_id: str, memory_mb: float | None = None) -> Job | None:
+        """Manual retry of a terminal job (failed/interrupted/cancelled): same id and history.
+        ``memory_mb`` replaces the stored reservation (estimates can change between versions)."""
         now = time.time()
         with self._tx() as c:
+            if memory_mb is not None:
+                c.execute(
+                    "UPDATE jobs SET memory_mb=? WHERE id=? AND status IN ('failed','interrupted','cancelled')",
+                    (float(memory_mb), job_id),
+                )
             n = c.execute(
                 "UPDATE jobs SET status='queued', stage='queued', cancel_requested=0, "
                 "cancel_requested_at=NULL, finished_at=NULL, updated_at=?, next_attempt_at=NULL, "
