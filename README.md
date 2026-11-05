@@ -106,10 +106,21 @@ docker run --rm -p 127.0.0.1:8000:8000 -v "$PWD/data:/data" ghcr.io/leo-aa88/aer
    uv run aerodoppler results export <run-id> --format geojson
    ```
 
-4. **Review in the UI** (`make serve`): Import → Spectrogram lab (zoom, contrast, click-to-draw
-   ridges, harmonic overlay, Δt readout) → Search (Mode A/B, resource caps, live progress, cancel)
-   → Results (map with tracks, distinct maxima and score landscape; ranked table; observed vs
-   predicted overlays; JSON/GeoJSON/manifest/zip export) → Data & privacy (purge, audit log).
+4. **Review in the UI** (`make serve`): Import (guided steps, time metadata, flight archive) →
+   Spectrogram lab (overview, zoom to events, evidence labels, detection diagnostics, hand-drawn
+   ridges) → Search (prerequisite checklist, presets, workload estimate) → Results (verdict
+   first, map with the relevant tracks, ranked table, observed vs predicted overlays, exports) →
+   Jobs (every import, analysis and search, live progress, cancel/retry) → Data & privacy.
+
+**Background jobs.** Imports, audio decoding, spectrograms, detection, searches and benchmarks run
+as persistent jobs in their own processes, admitted against per-type concurrency limits and one
+shared memory budget derived from what the machine (cgroup/WSL) actually allows. A browser
+reload or a server restart neither stops nor duplicates them; a crashed or killed worker is
+reconciled (imports resume, others are marked interrupted with the reason) and never keeps a
+slot. Command-line imports, searches and benchmarks go through the same admission.
+`aerodoppler jobs list|show|cancel|retry` and the Jobs page show and control them. Details,
+configuration and recovery semantics: [`docs/jobs.md`](docs/jobs.md); a step-by-step guide:
+[`docs/USER_GUIDE.md`](docs/USER_GUIDE.md).
 
 | Spectrogram lab | Search |
 |---|---|

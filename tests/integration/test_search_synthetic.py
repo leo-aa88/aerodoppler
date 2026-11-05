@@ -110,8 +110,11 @@ def test_mode_a_unknown_time_recovers_location_and_clock(world):
         and (run_dir / "heatmap.csv").exists()
     )
     assert list((run_dir / "curves").glob("cand_*.json"))
-    job = w["store"].get_search(res.run_id)
-    assert job["status"] == "succeeded"
+    from aerodoppler.jobs.queue import SqliteJobQueue
+
+    job = SqliteJobQueue(w["settings"].db_path).get(res.run_id)
+    assert job.status == "succeeded" and job.mode == "inline"
+    assert not (run_dir / "INCOMPLETE").exists()
 
 
 def test_mode_b_known_time_single_event(world):
@@ -246,7 +249,7 @@ def test_missing_dem_is_an_explicit_error(world):
 def test_search_over_memory_budget_stops_cleanly(world, monkeypatch):
     """A search that exceeds its memory budget fails visibly instead of exhausting RAM."""
     import aerodoppler.resources as res
-    from aerodoppler.jobs.runner import SearchResourceExceeded
+    from aerodoppler.jobs.queue import JobError, SqliteJobQueue
 
     w = world
     monkeypatch.setattr(res, "tree_pss_mb", lambda pid=None: 1e9)
@@ -259,11 +262,12 @@ def test_search_over_memory_budget_stops_cleanly(world, monkeypatch):
         flight_dataset_ids=[w["sc"].dataset.dataset_id],
         quality_settings=QualitySettings(workers=1),
     )
-    with pytest.raises(SearchResourceExceeded):
+    with pytest.raises(JobError) as e:
         run_search_inline(w["store"], w["settings"], req)
-    job = w["store"].list_searches()[0]
-    assert job["status"] == "failed" and job["stage"] == "memory_budget"
-    assert "budget" in job["error"]
+    assert e.value.code == "memory_budget"
+    job = SqliteJobQueue(w["settings"].db_path).list(types=["geolocation_search"])[0]
+    assert job.status == "failed" and job.error_code == "memory_budget"
+    assert "budget" in job.error_message
 
 
 def test_search_without_datasets_uses_only_date_compatible_ones(world):

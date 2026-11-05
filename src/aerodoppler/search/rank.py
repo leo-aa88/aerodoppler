@@ -84,7 +84,7 @@ def gate_results(
     null_n: list[int] | None = None,
     null_offset_range_s: tuple[float, float] | None = None,
     event_flags: list[list[str]] | None = None,
-    null_diagnostics: dict | None = None,
+    null_diagnostics: dict | list[dict] | None = None,
     event_evidence: list[dict] | None = None,
     track_support: tuple[bool, str] | None = None,
     completeness: tuple[bool, str] | None = None,
@@ -117,7 +117,8 @@ def gate_results(
             # no usable null: fail visibly instead of comparing with a made-up null, and say
             # why (no admissible misalignment at all, or too few valid scores among them)
             ok_events.append(False)
-            nd = null_diagnostics or {}
+            nd_all = null_diagnostics
+            nd = (nd_all[i] if isinstance(nd_all, list) and i < len(nd_all) else nd_all) or {}
             if nd.get("band") is None and null_diagnostics is not None:
                 why = (
                     "no clock shift satisfies "
@@ -142,7 +143,12 @@ def gate_results(
         ok = sig >= 2.0 and cov >= min_coverage
         ok_events.append(ok)
         n_txt = f", n={n_null}" if n_null is not None else ""
-        if null_offset_range_s is not None:
+        band_i = None
+        if isinstance(null_diagnostics, list) and i < len(null_diagnostics):
+            band_i = (null_diagnostics[i] or {}).get("band")
+        if band_i:
+            n_txt += f", |offsets| {band_i[0]:.0f}–{band_i[1]:.0f} s"
+        elif null_offset_range_s is not None:
             # short clips only allow a narrow band of offsets, so the null spread (and this σ)
             # says little beyond "above chance"; show the band so the figure is not over-read
             lo, hi = null_offset_range_s

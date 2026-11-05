@@ -7,6 +7,7 @@ import asyncio
 import json
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -17,19 +18,14 @@ from sse_starlette.sse import EventSourceResponse
 from aerodoppler import __version__
 from aerodoppler.api import schemas as S
 from aerodoppler.api.errors import api_error, scrub
-from aerodoppler.audio.decode import AudioDecodeError
-from aerodoppler.audio.ridges import DetectorConfig
 from aerodoppler.audio.service import (
     NotFound,
+    RecordingBusy,
     add_manual_event,
-    ensure_spectrogram,
-    ingest_recording,
-    propose_events,
     purge_recording,
     spectrogram_payload,
 )
 from aerodoppler.config import Settings
-from aerodoppler.jobs.runner import JobRejected, cancel_search, submit_search
 from aerodoppler.jobs.store import Store
 from aerodoppler.models import SearchMode, SearchRequest, SearchResult
 from aerodoppler.util import safe_filename
@@ -74,8 +70,9 @@ def health(settings: Settings = Depends(get_settings_dep)) -> S.HealthResponse:
 # ---- recordings -------------------------------------------------------------------------
 
 
-@router.post("/api/recordings", response_model=S.RecordingCreateResponse, status_code=201)
+@router.post("/api/recordings", status_code=202)
 async def create_recording(
+    request: Request,
     file: UploadFile = File(...),
     owner_permission_confirmed: bool = Form(True),
     recording_date_utc: str | None = Form(None),
@@ -87,12 +84,18 @@ async def create_recording(
     date_latest_utc: str | None = Form(None),
     segment_start_s: float = Form(0.0, ge=0),
     segment_duration_s: float | None = Form(None, gt=0),
+    wait_s: float = Query(0.0, ge=0, le=600, description="wait this long for the ingest job"),
     settings: Settings = Depends(get_settings_dep),
     store: Store = Depends(get_store_dep),
-) -> S.RecordingCreateResponse:
-    """Upload a file. ``start_time_utc`` is the UTC time of the file's first sample (with
-    its uncertainty); files longer than the analysis limit are analysed in segments."""
+) -> Any:
+    """Upload a file and queue its decoding as an ``audio_ingest`` job (202 + job). The upload
+    itself is the only work done in the request. ``start_time_utc`` is the UTC time of the
+    file's first sample; files longer than the analysis limit are analysed in segments. With
+    ``wait_s`` the request waits for the job and answers 201 with the recording when done."""
+    from aerodoppler.audio.decode import ffprobe_duration
     from aerodoppler.audio.service import TimeMetadataError, check_time_metadata
+    from aerodoppler.jobs.service import JobRejected, submit_job
+    from aerodoppler.util import new_id
 
     empty = lambda v: v if v not in ("", None) else None  # noqa: E731 (form fields)
     recording_date_utc, start_time_utc = empty(recording_date_utc), empty(start_time_utc)
@@ -109,98 +112,130 @@ async def create_recording(
         raise api_error(422, "time_metadata", str(e), field=e.field, action=e.action) from e
     name = safe_filename(file.filename or "upload.wav")
     limit = settings.max_upload_mb * 1024 * 1024
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td) / name
-        size = 0
-        with open(tmp, "wb") as fh:
-            while True:
-                chunk = await file.read(1 << 20)
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > limit:
-                    raise api_error(
-                        413,
-                        "upload_too_large",
-                        f"the file exceeds the {settings.max_upload_mb} MB upload limit",
-                        field="file",
-                        action="extract the audio track (e.g. ffmpeg -i video.mp4 -vn -c:a flac out.flac) or raise AERODOPPLER_MAX_UPLOAD_MB",
-                    )
-                fh.write(chunk)
-        try:
-            rec = await asyncio.to_thread(
-                ingest_recording,
-                store,
-                settings,
-                tmp,
-                owner_permission_confirmed=True,
-                recording_date_utc=recording_date_utc,
-                start_time_utc=start_time_utc,
-                start_time_uncertainty_s=start_time_uncertainty_s,
-                synthetic=synthetic,
-                notes=notes,
-                segment_start_s=segment_start_s,
-                segment_duration_s=segment_duration_s,
-                date_earliest_utc=date_earliest_utc,
-                date_latest_utc=date_latest_utc,
-            )
-        except AudioDecodeError as e:
-            raise api_error(
-                422,
-                "decode_failed",
-                f"audio could not be decoded: {e}",
-                field="file",
-                action="check that the file plays; for videos the first audio track is used",
-            ) from e
-    return S.RecordingCreateResponse(recording=rec, warnings=_recording_warnings(rec))
+    stage_dir = settings.data_dir / "uploads" / new_id("upl")
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    tmp = stage_dir / name
+    size = 0
+    with open(tmp, "wb") as fh:
+        while True:
+            chunk = await file.read(1 << 20)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > limit:
+                fh.close()
+                shutil.rmtree(stage_dir, ignore_errors=True)
+                raise api_error(
+                    413,
+                    "upload_too_large",
+                    f"the file exceeds the {settings.max_upload_mb} MB upload limit",
+                    field="file",
+                    action="extract the audio track (e.g. ffmpeg -i video.mp4 -vn -c:a flac out.flac) or raise AERODOPPLER_MAX_UPLOAD_MB",
+                )
+            fh.write(chunk)
+    probe: dict[str, Any] = {}
+    try:
+        import soundfile as sf
+
+        info = sf.info(str(tmp))
+        probe = {
+            "probe_duration_s": info.duration,
+            "probe_sample_rate": info.samplerate,
+            "probe_channels": info.channels,
+        }
+    except Exception:
+        dur = await asyncio.to_thread(ffprobe_duration, tmp)
+        if dur:
+            probe = {"probe_duration_s": dur}
+    params = {
+        "upload_path": str(tmp),
+        "original_filename": file.filename or name,
+        "recording_date_utc": recording_date_utc,
+        "start_time_utc": start_time_utc,
+        "start_time_uncertainty_s": start_time_uncertainty_s,
+        "synthetic": synthetic,
+        "notes": notes,
+        "segment_start_s": segment_start_s,
+        "segment_duration_s": segment_duration_s,
+        "date_earliest_utc": date_earliest_utc,
+        "date_latest_utc": date_latest_utc,
+        **probe,
+    }
+    try:
+        job, _ = submit_job(settings, "audio_ingest", params, queue=request.app.state.queue)
+    except JobRejected as e:
+        shutil.rmtree(stage_dir, ignore_errors=True)
+        raise api_error(422, e.code, str(e), field="file") from e
+    return await _maybe_wait(request, job.id, wait_s)
 
 
-def _recording_warnings(rec: Any) -> list[str]:
-    from aerodoppler.audio.service import segment_notice
+async def _maybe_wait(request: Request, job_id: str, wait_s: float) -> Any:
+    """Return 202 + the job, or — when ``wait_s`` > 0 and the job finishes in time — 201 with
+    the job and its result (compatibility for scripts that expect the object directly)."""
+    from aerodoppler.api.jobs_routes import job_view
+    from aerodoppler.jobs.queue import TERMINAL
 
-    warnings = []
-    note = segment_notice(rec)
-    if note:
-        warnings.append(note)
-    if rec.time_basis == "upper_bound_only":
-        warnings.append(
-            f"only an upper bound on the date is known (recorded on or before "
-            f"{rec.date_latest_utc}); flight matching needs the UTC day, so a search is not "
-            "possible until the day is established"
+    q = request.app.state.queue
+    deadline = time.time() + wait_s
+    job = q.get(job_id)
+    while wait_s > 0 and job.status not in TERMINAL and time.time() < deadline:
+        await asyncio.sleep(0.25)
+        job = q.get(job_id)
+    view = job_view(job)
+    if job.status in ("succeeded", "abstained"):
+        out = {**view, "job": view}
+        rid = (job.result or {}).get("recording_id")
+        if rid:
+            rec = request.app.state.store.get_recording(rid)
+            out["recording"] = rec.model_dump() if rec else None
+            out["warnings"] = (job.result or {}).get("warnings", [])
+        return JSONResponse(status_code=201, content=json.loads(json.dumps(out, default=str)))
+    if job.status in TERMINAL:
+        err = view.get("error") or {}
+        raise api_error(
+            422,
+            err.get("code") or job.status,
+            err.get("message") or f"job {job.status}",
+            job_id=job.id,
         )
-    elif rec.time_basis == "date_range":
-        warnings.append(
-            f"the day is only known to lie between {rec.date_earliest_utc} and "
-            f"{rec.date_latest_utc}; each candidate day needs its own ~3.5 GB flight archive"
-        )
-    elif rec.time_basis == "unknown":
-        warnings.append(
-            "no recording date or time: flight matching needs at least the UTC day "
-            "(unknown-time mode) or the UTC start time (known-time mode)"
-        )
-    return warnings
+    return JSONResponse(status_code=202, content=json.loads(json.dumps(view, default=str)))
 
 
-@router.post("/api/recordings/{rec_id}/segments", status_code=201)
-def create_recording_segment(
+@router.post("/api/recordings/{rec_id}/segments", status_code=202)
+async def create_recording_segment(
     rec_id: str,
     body: S.SegmentRequest,
+    request: Request,
+    wait_s: float = Query(0.0, ge=0, le=600),
     settings: Settings = Depends(get_settings_dep),
     store: Store = Depends(get_store_dep),
-) -> S.RecordingCreateResponse:
-    """Analyse another interval of the same preserved source file (e.g. the rest of a file
-    longer than the analysis limit). Creates a new recording; times map back to the source."""
-    from aerodoppler.audio.service import create_segment
+) -> Any:
+    """Analyse another interval of the same preserved source file (an ``audio_ingest`` job)."""
+    from aerodoppler.jobs.service import JobRejected, submit_job
 
-    try:
-        rec = create_segment(
-            store, settings, _safe_id(rec_id, "recording"), body.start_s, body.duration_s
+    parent = store.get_recording(_safe_id(rec_id, "recording"))
+    if parent is None:
+        raise api_error(404, "recording_not_found", "recording not found")
+    if parent.source_duration_s and body.start_s >= parent.source_duration_s:
+        raise api_error(
+            422,
+            "segment_invalid",
+            f"segment start {body.start_s:.0f} s is beyond the end of the file ({parent.source_duration_s:.0f} s)",
+            field="start_s",
         )
-    except NotFound as e:
-        raise api_error(404, "recording_not_found", "recording not found") from e
-    except AudioDecodeError as e:
-        raise api_error(422, "segment_invalid", str(e), field="start_s") from e
-    return S.RecordingCreateResponse(recording=rec, warnings=_recording_warnings(rec))
+    params = {
+        "parent_recording_id": rec_id,
+        "start_s": body.start_s,
+        "duration_s": body.duration_s,
+        "probe_sample_rate": parent.sample_rate_hz,
+        "probe_channels": parent.channels,
+        "probe_duration_s": body.duration_s,
+    }
+    try:
+        job, _ = submit_job(settings, "audio_ingest", params, queue=request.app.state.queue)
+    except JobRejected as e:
+        raise api_error(422, e.code, str(e)) from e
+    return await _maybe_wait(request, job.id, wait_s)
 
 
 @router.get("/api/recordings", response_model=S.RecordingList)
@@ -209,20 +244,50 @@ def list_recordings(store: Store = Depends(get_store_dep)) -> S.RecordingList:
 
 
 @router.get("/api/recordings/{rec_id}")
-def get_recording(rec_id: str, store: Store = Depends(get_store_dep)) -> dict[str, Any]:
+def get_recording(
+    rec_id: str, request: Request, store: Store = Depends(get_store_dep)
+) -> dict[str, Any]:
     rec = store.get_recording(_safe_id(rec_id, "recording"))
     if rec is None:
         raise HTTPException(status_code=404, detail="recording not found")
     return {
         "recording": rec.model_dump(),
         "events": [e.model_dump() for e in store.list_events(rec.id)],
-        "searches": store.list_searches(rec.id),
+        "searches": [
+            _search_view(j).model_dump()
+            for j in request.app.state.queue.list(
+                types=["geolocation_search"], recording_id=rec.id, limit=200
+            )
+        ],
     }
+
+
+def _spectrogram_or_job(request: Request, rec: Any) -> Any:
+    """The cached spectrogram, or a 202 with the (deduplicated) job computing it."""
+    from aerodoppler.api.jobs_routes import job_view
+    from aerodoppler.audio.spectrogram import Spectrogram
+    from aerodoppler.jobs.service import JobRejected, submit_job
+
+    store: Store = request.app.state.store
+    p = store.spectrogram_path(rec.id)
+    if p and p.exists():
+        return Spectrogram.load(p)
+    try:
+        job, _ = submit_job(
+            request.app.state.settings,
+            "spectrogram_generation",
+            {"recording_id": rec.id, "duration_s": rec.duration_s},
+            queue=request.app.state.queue,
+        )
+    except JobRejected as e:
+        raise api_error(422, e.code, str(e)) from e
+    return JSONResponse(status_code=202, content=json.loads(json.dumps(job_view(job), default=str)))
 
 
 @router.get("/api/recordings/{rec_id}/spectrogram", response_model=S.SpectrogramResponse)
 def get_spectrogram(
     rec_id: str,
+    request: Request,
     t0: float | None = Query(None, ge=0),
     t1: float | None = Query(None, ge=0),
     f0: float | None = Query(None, ge=0),
@@ -230,16 +295,16 @@ def get_spectrogram(
     layer: str = Query("whitened", pattern="^(whitened|power)$"),
     max_frames: int = Query(1200, ge=50, le=4000),
     max_bins: int = Query(700, ge=50, le=2000),
-    settings: Settings = Depends(get_settings_dep),
     store: Store = Depends(get_store_dep),
-) -> S.SpectrogramResponse:
+) -> Any:
+    """A view of the spectrogram. While it is being computed (first access of a recording)
+    the answer is 202 with the spectrogram job; poll it and ask again."""
     rec = store.get_recording(_safe_id(rec_id, "recording"))
     if rec is None:
-        raise HTTPException(status_code=404, detail="recording not found")
-    try:
-        spec = ensure_spectrogram(store, settings, rec.id)
-    except NotFound as e:
-        raise HTTPException(status_code=404, detail="recording not found") from e
+        raise api_error(404, "recording_not_found", "recording not found")
+    spec = _spectrogram_or_job(request, rec)
+    if isinstance(spec, JSONResponse):
+        return spec
     p = spectrogram_payload(
         spec, t0, t1, f0, f1, max_frames=max_frames, max_bins=max_bins, layer=layer
     )
@@ -248,14 +313,14 @@ def get_spectrogram(
 
 @router.get("/api/recordings/{rec_id}/spectrogram.png")
 def get_spectrogram_png(
-    rec_id: str,
-    settings: Settings = Depends(get_settings_dep),
-    store: Store = Depends(get_store_dep),
+    rec_id: str, request: Request, store: Store = Depends(get_store_dep)
 ) -> Response:
     rec = store.get_recording(_safe_id(rec_id, "recording"))
     if rec is None:
-        raise HTTPException(status_code=404, detail="recording not found")
-    spec = ensure_spectrogram(store, settings, rec.id)
+        raise api_error(404, "recording_not_found", "recording not found")
+    spec = _spectrogram_or_job(request, rec)
+    if isinstance(spec, JSONResponse):
+        return spec
     d = store.recording_dir(rec.id)
     assert d is not None
     from aerodoppler.validation.plots import plot_spectrogram
@@ -318,31 +383,47 @@ def review_event(
     return S.EventList(events=_with_assessment([ev]))
 
 
-@router.post("/api/recordings/{rec_id}/events/detect", response_model=S.EventList)
+@router.post("/api/recordings/{rec_id}/events/detect", status_code=202)
 async def detect_events(
     rec_id: str,
+    request: Request,
     body: S.DetectRequest | None = None,
-    settings: Settings = Depends(get_settings_dep),
+    wait_s: float = Query(0.0, ge=0, le=600),
     store: Store = Depends(get_store_dep),
-) -> S.EventList:
+) -> Any:
+    """Queue automatic ridge detection (a ``ridge_detection`` job). Its result holds the new
+    event ids and the diagnostics; the events themselves appear in the events list."""
+    from aerodoppler.jobs.service import JobRejected, submit_job
+
     body = body or S.DetectRequest()
-    if store.get_recording(_safe_id(rec_id, "recording")) is None:
-        raise HTTPException(status_code=404, detail="recording not found")
-    diag: dict[str, Any] = {}
+    rec = store.get_recording(_safe_id(rec_id, "recording"))
+    if rec is None:
+        raise api_error(404, "recording_not_found", "recording not found")
     try:
-        events = await asyncio.to_thread(
-            propose_events,
-            store,
-            settings,
-            rec_id,
-            DetectorConfig(threshold_z=body.threshold_z, min_duration_s=body.min_duration_s),
-            body.save,
-            True,
-            diag,
+        job, _ = submit_job(
+            request.app.state.settings,
+            "ridge_detection",
+            {
+                "recording_id": rec_id,
+                "threshold_z": body.threshold_z,
+                "min_duration_s": body.min_duration_s,
+                "save": body.save,
+                "duration_s": rec.duration_s,
+            },
+            queue=request.app.state.queue,
         )
-    except NotFound as e:
-        raise api_error(404, "recording_not_found", "recording not found") from e
-    return S.EventList(events=_with_assessment(events), diagnostics=diag)
+    except JobRejected as e:
+        raise api_error(422, e.code, str(e)) from e
+    resp = await _maybe_wait(request, job.id, wait_s)
+    if resp.status_code == 201:
+        j = request.app.state.queue.get(job.id)
+        ids = set((j.result or {}).get("event_ids") or [])
+        evs = [e for e in store.list_events(rec_id) if e.id in ids]
+        payload = json.loads(resp.body)
+        payload["events"] = [e.model_dump(mode="json") for e in _with_assessment(evs)]
+        payload["diagnostics"] = (j.result or {}).get("diagnostics")
+        return JSONResponse(status_code=201, content=json.loads(json.dumps(payload, default=str)))
+    return resp
 
 
 @router.delete("/api/recordings/{rec_id}/events/{event_id}")
@@ -365,7 +446,11 @@ def delete_recording(
     try:
         out = purge_recording(store, settings, _safe_id(rec_id, "recording"))
     except NotFound as e:
-        raise HTTPException(status_code=404, detail="recording not found") from e
+        raise api_error(404, "recording_not_found", "recording not found") from e
+    except RecordingBusy as e:
+        raise api_error(
+            409, "recording_busy", str(e), action="cancel its jobs on the Jobs page, then delete"
+        ) from e
     return S.PurgeResponse(**out)
 
 
@@ -407,22 +492,20 @@ def flight_dataset_detail(
     return {"manifest": ds.manifest(), "coverage": FlightIndex([ds]).coverage_summary()}
 
 
-@router.post("/api/flight-datasets/import", status_code=202)
-def flight_import(
-    body: S.FlightImportRequest,
-    settings: Settings = Depends(get_settings_dep),
-    store: Store = Depends(get_store_dep),
-) -> dict[str, Any]:
-    """Start (or reuse) a persistent import job; poll ``/api/imports/{id}`` for progress.
-
-    Cheap checks happen here, before any job or download: date format, a day that has not
-    ended or predates the archive, a missing local path, an unconfirmed multi-GB download."""
+def validated_import(
+    raw: dict[str, Any], settings: Settings
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Check an import request before any job or download exists. Returns ``(params, None)``,
+    or ``(params, response)`` when nothing needs to run (the dataset is already imported)."""
     import datetime as dt
 
     from aerodoppler.adsb.adsblol import ARCHIVE_FIRST_DAY, availability_kind_for_missing
     from aerodoppler.adsb.ingest import dataset_id_for
-    from aerodoppler.jobs.imports import ImportRejected, submit_import
 
+    try:
+        body = S.FlightImportRequest.model_validate(raw)
+    except ValueError as e:
+        raise api_error(422, "invalid_request", str(e)) from e
     try:
         day = dt.date.fromisoformat(body.date_utc)
     except ValueError as e:
@@ -474,145 +557,49 @@ def flight_import(
         body.margin_km,
         body.exclude_jets,
     )
+    params = body.model_dump()
+    params["bbox"] = body.bbox.model_dump()
     if not body.force and (settings.normalized_dir / ds_id / "manifest.json").exists():
-        return {"outcome": "exists", "dataset_id": ds_id, "job": None}
-    request = body.model_dump()
-    request["bbox"] = body.bbox.model_dump()
+        return params, {"outcome": "exists", "dataset_id": ds_id, "job": None, "job_id": None}
+    return params, None
+
+
+@router.post("/api/flight-datasets/import", status_code=202)
+def flight_import(body: S.FlightImportRequest, request: Request) -> Any:
+    """Start (or reuse) a persistent ``flight_import`` job; progress at ``/api/jobs/{id}``."""
+    from aerodoppler.adsb.ingest import dataset_id_for
+    from aerodoppler.api.jobs_routes import accepted
+    from aerodoppler.jobs.service import JobRejected, submit_job
+
+    settings: Settings = request.app.state.settings
+    params, early = validated_import(body.model_dump(), settings)
+    if early is not None:
+        return JSONResponse(status_code=200, content=early)
     try:
-        job, outcome = submit_import(store, settings, request)
-    except ImportRejected as e:
-        raise api_error(
-            429, "import_slot_busy", str(e), action="wait for it or cancel it on the Jobs page"
-        ) from e
-    return {"outcome": outcome, "dataset_id": ds_id, "job": _import_view(job)}
+        job, created = submit_job(settings, "flight_import", params, queue=request.app.state.queue)
+    except JobRejected as e:
+        raise api_error(422, e.code, str(e)) from e
+    ds_id = dataset_id_for(
+        "local" if body.provider == "local" else "adsblol",
+        body.date_utc,
+        body.bbox,
+        body.margin_km,
+        body.exclude_jets,
+    )
+    view = accepted(job, created)
+    return {**view, "dataset_id": ds_id, "job": view}
 
 
-def _import_view(job: dict[str, Any]) -> dict[str, Any]:
-    from aerodoppler.jobs.proc import is_stalled, job_process_alive
-
-    out = {k: v for k, v in job.items() if k not in ("pid_started_at",)}
-    out["kind"] = "import"
-    out["stalled"] = is_stalled(job)
-    out["worker_alive"] = job_process_alive(job) if job["status"] == "running" else False
-    if out.get("error"):
-        out["error"] = scrub(out["error"])
-    return out
-
-
+# compatibility aliases for the pre-queue import endpoints (documented in docs/jobs.md)
 @router.get("/api/imports")
-def list_imports(store: Store = Depends(get_store_dep)) -> dict[str, Any]:
-    from aerodoppler.jobs.imports import reconcile_stale_imports
+def list_imports(request: Request) -> dict[str, Any]:
+    from aerodoppler.api.jobs_routes import job_view
 
-    reconcile_stale_imports(store)
-    return {"imports": [_import_view(j) for j in store.list_imports()]}
-
-
-@router.get("/api/imports/{import_id}")
-def get_import(import_id: str, store: Store = Depends(get_store_dep)) -> dict[str, Any]:
-    from aerodoppler.jobs.imports import reconcile_stale_imports
-
-    reconcile_stale_imports(store)
-    job = store.get_import(_safe_id(import_id, "import"))
-    if job is None:
-        raise api_error(404, "not_found", "import not found")
-    return _import_view(job)
-
-
-@router.get("/api/imports/{import_id}/log")
-def import_log(
-    import_id: str, lines: int = Query(200, ge=1, le=5000), store: Store = Depends(get_store_dep)
-) -> dict[str, Any]:
-    job = store.get_import(_safe_id(import_id, "import"))
-    if job is None:
-        raise api_error(404, "not_found", "import not found")
-    p = Path(job["log_path"]) if job.get("log_path") else None
-    text = p.read_text(errors="replace").splitlines()[-lines:] if p and p.exists() else []
-    return {"lines": [scrub(t) for t in text]}
-
-
-@router.post("/api/imports/{import_id}/cancel")
-def cancel_import_route(import_id: str, store: Store = Depends(get_store_dep)) -> dict[str, Any]:
-    from aerodoppler.jobs.imports import cancel_import
-
-    if not cancel_import(store, _safe_id(import_id, "import")):
-        raise api_error(409, "not_running", "this import is not running")
-    job = store.get_import(import_id)
-    assert job is not None
-    return _import_view(job)
-
-
-@router.post("/api/imports/{import_id}/retry", status_code=202)
-def retry_import(
-    import_id: str,
-    settings: Settings = Depends(get_settings_dep),
-    store: Store = Depends(get_store_dep),
-) -> dict[str, Any]:
-    """Start a new job with the same request (cached and partial downloads are reused)."""
-    from aerodoppler.jobs.imports import ImportRejected, submit_import
-
-    job = store.get_import(_safe_id(import_id, "import"))
-    if job is None:
-        raise api_error(404, "not_found", "import not found")
-    if job["status"] in ("queued", "running"):
-        raise api_error(409, "still_running", "this import is still running")
-    try:
-        new, outcome = submit_import(store, settings, job["request"])
-    except ImportRejected as e:
-        raise api_error(429, "import_slot_busy", str(e)) from e
-    return {"outcome": outcome, "job": _import_view(new)}
-
-
-@router.get("/api/jobs")
-def all_jobs(
-    settings: Settings = Depends(get_settings_dep), store: Store = Depends(get_store_dep)
-) -> dict[str, Any]:
-    """Every job on this machine (all recordings), with live counts and resource limits."""
-    from aerodoppler.jobs.imports import reconcile_stale_imports
-    from aerodoppler.jobs.proc import is_stalled
-    from aerodoppler.jobs.runner import reconcile_stale_jobs
-    from aerodoppler.resources import disk_free_bytes, snapshot
-
-    reconcile_stale_jobs(store)
-    reconcile_stale_imports(store)
-    searches = store.list_searches()[:50]
-    imports = store.list_imports(limit=50)
-    recs = {r.id: r.original_filename for r in store.list_recordings()}
-    sv = []
-    for j in searches:
-        sv.append(
-            {
-                "kind": "search",
-                "id": j["id"],
-                "recording_id": j["recording_id"],
-                "recording": recs.get(j["recording_id"]),
-                "status": j["status"],
-                "stage": j["stage"],
-                "created_at": j["created_at"],
-                "updated_at": j["updated_at"],
-                "error": scrub(j["error"]) if j.get("error") else None,
-                "progress": j["progress"],
-                "stalled": is_stalled(j),
-                "mode": (j["request"] or {}).get("mode"),
-            }
-        )
     return {
-        "searches": sv,
-        "imports": [_import_view(j) for j in imports],
-        "counts": {
-            "searches_active": sum(1 for j in searches if j["status"] in ("queued", "running")),
-            "searches_limit": settings.max_concurrent_jobs,
-            "imports_active": sum(1 for j in imports if j["status"] in ("queued", "running")),
-            "imports_limit": settings.max_concurrent_imports,
-        },
-        "resources": {
-            **snapshot().as_dict(),
-            "data_dir": str(settings.data_dir),
-            "disk_free_gb": round(disk_free_bytes(settings.data_dir) / 1e9, 1),
-        },
+        "imports": [
+            job_view(j) for j in request.app.state.queue.list(types=["flight_import"], limit=100)
+        ]
     }
-
-
-# ---- searches ---------------------------------------------------------------------------
 
 
 def _validated_search(
@@ -736,13 +723,13 @@ def estimate_search(
     return estimate_workload(settings, rec, req)
 
 
-@router.post("/api/searches", response_model=S.SearchStatus, status_code=202)
-def create_search(
-    body: S.SearchCreateRequest,
-    settings: Settings = Depends(get_settings_dep),
-    store: Store = Depends(get_store_dep),
-) -> S.SearchStatus:
-    """Validate every prerequisite before a job exists; errors name the field and the fix."""
+def validated_search_params(
+    raw: dict[str, Any], settings: Settings, store: Store
+) -> dict[str, Any]:
+    try:
+        body = S.SearchCreateRequest.model_validate(raw)
+    except ValueError as e:
+        raise api_error(422, "invalid_request", str(e)) from e
     _rec, req = _validated_search(body, settings, store)
     area = req.bbox.approx_area_km2() if req.bbox else 0
     if area > 40_000 and not req.national_scale_confirmed:
@@ -753,77 +740,106 @@ def create_search(
             field="national_scale_confirmed",
             action="confirm the large-scale search or shrink the area",
         )
+    return req.model_dump(mode="json")
+
+
+@router.post("/api/searches", response_model=S.SearchStatus, status_code=202)
+def create_search(body: S.SearchCreateRequest, request: Request) -> S.SearchStatus:
+    """Validate every prerequisite, then queue a ``geolocation_search`` job (202). The same
+    request while an identical search is queued or running returns that search."""
+    from aerodoppler.jobs.service import JobRejected, submit_job
+
+    settings: Settings = request.app.state.settings
+    params = validated_search_params(
+        body.model_dump(mode="json"), settings, request.app.state.store
+    )
     try:
-        run_id = submit_search(store, settings, req)
+        job, _ = submit_job(settings, "geolocation_search", params, queue=request.app.state.queue)
     except JobRejected as e:
-        raise api_error(
-            429,
-            "search_slots_full",
-            str(e),
-            action="wait for a search to finish or cancel one on the Jobs page",
-        ) from e
-    return _status(store, run_id)
+        raise api_error(422, e.code, str(e)) from e
+    return _search_view(job)
 
 
-def _status(store: Store, run_id: str) -> S.SearchStatus:
-    job = store.get_search(run_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="search not found")
+def _search_job(request: Request, run_id: str) -> Any:
+    j = request.app.state.queue.get(_safe_id(run_id, "search"))
+    if j is None or j.type != "geolocation_search":
+        raise api_error(404, "not_found", "search not found")
+    return j
+
+
+def _search_view(job: Any) -> S.SearchStatus:
+    from aerodoppler.api.jobs_routes import _iso
+
+    prog = dict(job.progress or {})
+    prog.setdefault(
+        "elapsed_s",
+        round(((job.finished_at or time.time()) - job.started_at), 1) if job.started_at else 0,
+    )
+    res = job.resources or {}
+    prog.setdefault("cpu_seconds", res.get("cpu_s"))
+    prog.setdefault("rss_mb", res.get("pss_mb"))
     return S.SearchStatus(
-        id=job["id"],
-        recording_id=job["recording_id"],
-        status=job["status"],
-        stage=job["stage"],
-        created_at=job["created_at"],
-        updated_at=job["updated_at"],
-        progress=job["progress"],
-        error=job["error"],
-        cancel_requested=job["cancel_requested"],
-        cpu_seconds=job["cpu_seconds"],
-        peak_rss_mb=job["peak_rss_mb"],
-        request=job["request"],
+        id=job.id,
+        recording_id=job.recording_id or (job.params or {}).get("recording_id", ""),
+        status=job.status,
+        stage=job.stage,
+        created_at=_iso(job.created_at) or "",
+        updated_at=_iso(job.updated_at) or "",
+        progress=prog,
+        error=scrub(job.error_message) if job.error_message else None,
+        cancel_requested=job.cancel_requested,
+        cpu_seconds=res.get("cpu_s") or res.get("cpu_seconds"),
+        peak_rss_mb=res.get("peak_pss_mb") or res.get("peak_rss_mb"),
+        request=job.params,
     )
 
 
 @router.get("/api/searches")
-def list_searches(
-    recording_id: str | None = None, store: Store = Depends(get_store_dep)
-) -> dict[str, Any]:
-    return {"searches": store.list_searches(recording_id)}
+def list_searches(request: Request, recording_id: str | None = None) -> dict[str, Any]:
+    jobs = request.app.state.queue.list(
+        types=["geolocation_search"], recording_id=recording_id, limit=500
+    )
+    return {"searches": [_search_view(j).model_dump() for j in jobs]}
 
 
 @router.get("/api/searches/{run_id}", response_model=S.SearchStatus)
-def search_status(run_id: str, store: Store = Depends(get_store_dep)) -> S.SearchStatus:
-    return _status(store, _safe_id(run_id, "search"))
+def search_status(run_id: str, request: Request) -> S.SearchStatus:
+    return _search_view(_search_job(request, run_id))
 
 
-def _load_result(store: Store, run_id: str) -> tuple[dict[str, Any], SearchResult | None]:
-    job = store.get_search(_safe_id(run_id, "search"))
-    if job is None:
-        raise HTTPException(status_code=404, detail="search not found")
-    p = Path(job["result_dir"]) / "result.json"
-    if not p.exists():
+def _result_dir(job: Any) -> Path:
+    return Path(job.work_dir) if job.work_dir else Path(job.params.get("_result_dir", "."))
+
+
+def _load_result(request: Request, run_id: str) -> tuple[Any, SearchResult | None]:
+    """The job and its result; a directory still marked INCOMPLETE is never read as a result."""
+    from aerodoppler.jobs.runner import INCOMPLETE
+
+    job = _search_job(request, run_id)
+    d = _result_dir(job)
+    p = d / "result.json"
+    if not p.exists() or (d / INCOMPLETE).exists():
         return job, None
     return job, SearchResult.model_validate_json(p.read_text())
 
 
 @router.get("/api/searches/{run_id}/candidates", response_model=S.CandidatesResponse)
-def search_candidates(run_id: str, store: Store = Depends(get_store_dep)) -> S.CandidatesResponse:
-    job, res = _load_result(store, run_id)
+def search_candidates(run_id: str, request: Request) -> S.CandidatesResponse:
+    job, res = _load_result(request, run_id)
     if res is None:
         return S.CandidatesResponse(
             run_id=run_id,
-            status=job["status"],
+            status=job.status,
             candidates=[],
             stage_counters=[],
             abstention=None,
-            warnings=[job["error"]] if job.get("error") else [],
+            warnings=[scrub(job.error_message)] if job.error_message else [],
             score_label="relative fit score (uncalibrated)",
             synthetic=False,
         )
     return S.CandidatesResponse(
         run_id=run_id,
-        status=job["status"],
+        status=job.status,
         candidates=res.candidates,
         stage_counters=res.stage_counters,
         abstention=res.abstention,
@@ -832,76 +848,65 @@ def search_candidates(run_id: str, store: Store = Depends(get_store_dep)) -> S.C
         synthetic=bool(res.manifest.get("synthetic_data")),
         confidence_grade=res.confidence_grade,
         gates=[g.model_dump() for g in res.gates],
+        alternatives=res.alternatives,
     )
 
 
 @router.get("/api/searches/{run_id}/candidates/{candidate_id}/curves")
-def candidate_curves(run_id: str, candidate_id: str, store: Store = Depends(get_store_dep)) -> Any:
-    job = store.get_search(_safe_id(run_id, "search"))
-    if job is None:
-        raise HTTPException(status_code=404, detail="search not found")
-    p = Path(job["result_dir"]) / "curves" / f"{_safe_id(candidate_id, 'candidate')}.json"
+def candidate_curves(run_id: str, candidate_id: str, request: Request) -> Any:
+    job = _search_job(request, run_id)
+    p = _result_dir(job) / "curves" / f"{_safe_id(candidate_id, 'candidate')}.json"
     if not p.exists():
-        raise HTTPException(status_code=404, detail="candidate curves not found")
+        raise api_error(404, "not_found", "candidate curves not found")
     return JSONResponse(content=json.loads(p.read_text()))
 
 
 @router.get("/api/searches/{run_id}/tracks")
-def search_tracks(run_id: str, store: Store = Depends(get_store_dep)) -> Any:
-    job = store.get_search(_safe_id(run_id, "search"))
-    if job is None:
-        raise HTTPException(status_code=404, detail="search not found")
-    p = Path(job["result_dir"]) / "tracks.json"
-    if not p.exists():
-        return JSONResponse(content=[])
-    return JSONResponse(content=json.loads(p.read_text()))
+def search_tracks(run_id: str, request: Request) -> Any:
+    p = _result_dir(_search_job(request, run_id)) / "tracks.json"
+    return JSONResponse(content=json.loads(p.read_text()) if p.exists() else [])
 
 
 @router.get("/api/searches/{run_id}/heatmap")
-def search_heatmap(run_id: str, store: Store = Depends(get_store_dep)) -> Any:
-    job = store.get_search(_safe_id(run_id, "search"))
-    if job is None:
-        raise HTTPException(status_code=404, detail="search not found")
-    p = Path(job["result_dir"]) / "heatmap.csv"
+def search_heatmap(run_id: str, request: Request) -> Any:
+    p = _result_dir(_search_job(request, run_id)) / "heatmap.csv"
     if not p.exists():
         return JSONResponse(content={"points": []})
-    rows = p.read_text().strip().split("\n")[1:]
     pts = []
-    for r in rows:
+    for r in p.read_text().strip().split("\n")[1:]:
         lat, lon, _e, _n, score, stage = r.split(",")
         pts.append([float(lat), float(lon), float(score), stage])
     return JSONResponse(content={"points": pts})
 
 
 @router.get("/api/searches/{run_id}/events")
-async def search_events(
-    run_id: str, request: Request, store: Store = Depends(get_store_dep)
-) -> EventSourceResponse:
-    """Server-sent progress events until the job reaches a terminal state."""
-    _safe_id(run_id, "search")
+async def search_events(run_id: str, request: Request) -> EventSourceResponse:
+    """Server-sent progress of a search (compatibility; ``/api/jobs/{id}/events`` is the
+    general form with resumable event ids)."""
+    from aerodoppler.jobs.queue import TERMINAL
+
+    _search_job(request, run_id)
+    q = request.app.state.queue
 
     async def gen():
         last = None
         while True:
             if await request.is_disconnected():
                 break
-            job = store.get_search(run_id)
-            if job is None:
-                yield {"event": "error", "data": json.dumps({"detail": "not found"})}
-                break
+            job = q.get(run_id)
             snap = json.dumps(
                 {
-                    "status": job["status"],
-                    "stage": job["stage"],
-                    "progress": job["progress"],
-                    "error": job["error"],
+                    "status": job.status,
+                    "stage": job.stage,
+                    "progress": job.progress,
+                    "error": job.error_message,
                 },
                 default=str,
             )
             if snap != last:
                 yield {"event": "progress", "data": snap}
                 last = snap
-            if job["status"] in ("succeeded", "failed", "cancelled", "abstained"):
+            if job.status in TERMINAL:
                 yield {"event": "done", "data": snap}
                 break
             await asyncio.sleep(1.0)
@@ -910,24 +915,27 @@ async def search_events(
 
 
 @router.post("/api/searches/{run_id}/cancel", response_model=S.SearchStatus)
-def search_cancel(run_id: str, store: Store = Depends(get_store_dep)) -> S.SearchStatus:
-    if not cancel_search(store, _safe_id(run_id, "search")):
-        raise HTTPException(status_code=409, detail="search is not running")
-    return _status(store, run_id)
+def search_cancel(run_id: str, request: Request) -> S.SearchStatus:
+    from aerodoppler.jobs.queue import TERMINAL
+
+    job = _search_job(request, run_id)
+    if job.status in TERMINAL:
+        raise api_error(409, "not_active", "search is not running")
+    return _search_view(request.app.state.queue.request_cancel(run_id))
 
 
 @router.get("/api/searches/{run_id}/export")
 def search_export(
     run_id: str,
+    request: Request,
     format: str = Query("json", pattern="^(json|geojson|manifest|zip)$"),
-    store: Store = Depends(get_store_dep),
 ) -> Any:
-    job, res = _load_result(store, run_id)
-    out_dir = Path(job["result_dir"])
+    job, res = _load_result(request, run_id)
+    out_dir = _result_dir(job)
     if format == "manifest":
         p = out_dir / "manifest.json"
         if not p.exists():
-            raise HTTPException(status_code=404, detail="manifest not available yet")
+            raise api_error(404, "not_found", "manifest not available yet")
         return FileResponse(p, media_type="application/json", filename=f"{run_id}_manifest.json")
     if format == "zip":
         tmp = Path(tempfile.mkdtemp()) / f"{run_id}"
@@ -936,7 +944,9 @@ def search_export(
             str(tmp) + ".zip", media_type="application/zip", filename=f"{run_id}.zip"
         )
     if res is None:
-        raise HTTPException(status_code=404, detail="result not available yet")
+        raise api_error(
+            404, "not_found", "result not available (search unfinished, failed or incomplete)"
+        )
     if format == "json":
         return JSONResponse(content=json.loads(res.model_dump_json()))
     return JSONResponse(content=result_to_geojson(res))

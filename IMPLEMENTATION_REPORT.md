@@ -622,6 +622,60 @@ before 2023 get a clear "no archive" message; no non-ADS-B path exists. The UI h
 contrast/snapshot tests yet (verified by headless-browser screenshots only). Events detected
 before this version have no per-point levels, so old template events keep the lenient label.
 
+### Persistent job queue 2026-11-05 (observed)
+
+One job system for flight imports, audio ingest, spectrograms, ridge detection, searches and
+benchmarks (`src/aerodoppler/jobs/`, `docs/jobs.md`): a SQLite `jobs` table behind a `JobQueue`
+interface, a scheduler (thread in `aerodoppler serve`, or `aerodoppler jobs scheduler`), one
+worker process per job with a 30 s lease renewed every 5 s, per-class concurrency (import 1,
+analysis 1, light 2) and one shared memory budget (70 % of usable RAM, cgroup/WSL aware) with
+head-of-line reservation. Request handlers no longer compute: upload, segments, first spectrogram
+view, detection, imports and searches answer 202 with a job. CLI imports/searches/benchmarks are
+inline jobs under the same admission with guaranteed finalisation; searches inside a benchmark
+are child jobs. Pre-queue `searches`/`imports` rows are copied once into `jobs` (old tables
+untouched; dead "running" rows become `interrupted`). Process identity = PID + creation time +
+job id on the command line; a lost worker is requeued (resume-safe types: imports, spectrograms)
+or interrupted; transient errors retry with doubling backoff up to `max_attempts`.
+
+Real-workload demonstration (`scripts/demo_job_resilience.py`, real `aerodoppler serve`, the
+cached 2026-11-03 day, whole-CONUS import; `data/runs/jobs_demo/report.json` and screenshots):
+
+| step | observed |
+|---|---|
+| submit CONUS import | 202 in 0.3 s; a duplicate returned the same job ("reused"); a second region was queued |
+| browser reload during parsing | same job on the Jobs page before and after (13,952 trace files parsed) |
+| API server stopped | the worker kept running (same PID 5 s later) |
+| new server started | same job, still parsing (21,376 files) |
+| worker SIGKILLed during parsing (= an OOM kill) | reconciled within ~2 s, re-queued as attempt 2 (imports are resume-safe), cached archive re-verified, completed in 382 s with 685,629 segments |
+| memory | import peak PSS 4,063 MB vs its 4,096 MB reservation; whole machine ≤ 9.9 GB used (two benchmarks ran concurrently) |
+| second import | waited 418 s for the import slot, then succeeded |
+
+Bugs found while integrating, all with regression tests: (1) forked scoring-pool children inherit
+the worker's SIGTERM handler, and multiprocessing stops a pool by sending SIGTERM to its
+children; the inherited handler then requested cancellation of the whole search — every API
+search using a pool cancelled itself after its first pool stage. Confirmed by logging handler
+calls (pids whose parent was the worker) and by the test failing without the fix; handlers now
+act only in the process that installed them. (2) Workers did not inherit the server's settings
+(only data dir and offline flag), so budgets and retry policy configured for the server were
+ignored in workers. (3) The per-event chance-match null of the overhaul above shared one clock
+shift across events; admissible bands of events with different window lengths barely overlap,
+which made correct synthetic answers "not estimable" (near_fast, short_sep_300, straight_b fell
+from high to low with unchanged 53/31/7 m errors). Nulls are now per event; the three cases are
+high again with 48 samples each. A first benchmark re-run made with the shared-shift version is
+superseded and not reported.
+
+Tests (offline): `tests/unit/test_jobs.py` (atomic claims under 16 concurrent claimers, 24
+concurrent duplicate submissions → 1 job, memory budget with head-of-line reservation, refusal of
+jobs larger than the budget, queued cancellation, owner-guarded idempotent transitions, retry with
+backoff and attempt limit, monotonic events, migration of 17 dead "running" rows, reconciliation of
+dead / PID-reused / hung workers, scheduler lock, orphaned children, no token or traceback in the
+API view) and `tests/integration/test_job_workers.py` with real worker processes (concurrency
+limit 2 never exceeded with 7 jobs — checked in the DB and among live processes; SIGKILL → slot
+freed; cooperative and forced cancellation; 400 MB allocation against a 50 MB reservation stopped;
+transient retries with a limit; API restart + event reconnection; inline admission waits;
+SIGKILLed inline CLI process reconciled; no starvation of a large job by a stream of small ones;
+forked-pool regression).
+
 ### Final test summary (observed, final code)
 
 ```

@@ -29,51 +29,52 @@ export interface Recording {
   date_latest_utc: string | null;
 }
 
-export interface ImportJob {
-  kind: "import";
+/** A background job (see docs/jobs.md): imports, ingest, spectrograms, detection, searches, benchmarks. */
+export interface Job {
+  job_id: string;
   id: string;
-  created_at: string;
-  updated_at: string;
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+  type: "flight_import" | "audio_ingest" | "spectrogram_generation" | "ridge_detection" | "geolocation_search" | "benchmark" | "diagnostic";
+  status: "queued" | "claimed" | "running" | "succeeded" | "abstained" | "failed" | "cancelled" | "interrupted";
   stage: string | null;
-  request: { provider?: string; date_utc: string; bbox: { west: number; south: number; east: number; north: number }; margin_km?: number; exclude_jets?: boolean };
-  progress: {
-    stage?: string;
-    stages?: Record<string, Record<string, unknown>>;
-    summary?: Record<string, unknown>;
-    storage_bytes?: number;
-    resources?: Record<string, unknown>;
-    details?: Record<string, unknown>;
-  };
+  status_url: string;
+  created_at: string;
+  started_at: string | null;
+  updated_at: string;
+  finished_at: string | null;
+  queue_wait_s: number | null;
+  duration_s: number | null;
+  params: Record<string, unknown>;
+  recording_id: string | null;
+  recording?: string | null;
   dataset_id: string | null;
-  error: string | null;
-  error_kind: string | null;
+  mode: "worker" | "inline" | "child";
+  attempt: number;
+  max_attempts: number;
+  next_attempt_at: string | null;
   cancel_requested: boolean;
-  heartbeat_at: number | null;
-  peak_rss_mb: number | null;
+  progress: { stage?: string; stages?: Record<string, Record<string, unknown>> };
+  resources: { pss_mb?: number; peak_pss_mb?: number; memory_reserved_mb?: number; cpu_s?: number; disk_free_gb?: number };
+  memory_reserved_mb: number;
+  resource_class: string;
+  error: { code: string | null; message: string | null; details: Record<string, unknown> | null } | null;
+  result: Record<string, unknown> | null;
+  has_log: boolean;
   stalled: boolean;
   worker_alive: boolean;
-}
-
-export interface SearchJobSummary {
-  kind: "search";
-  id: string;
-  recording_id: string;
-  recording: string | null;
-  status: string;
-  stage: string | null;
-  created_at: string;
-  updated_at: string;
-  error: string | null;
-  progress: SearchStatus["progress"];
-  stalled: boolean;
-  mode: string | null;
+  legacy: boolean;
+  outcome?: "created" | "reused";
 }
 
 export interface JobsOverview {
-  searches: SearchJobSummary[];
-  imports: ImportJob[];
-  counts: { searches_active: number; searches_limit: number; imports_active: number; imports_limit: number };
+  jobs: Job[];
+  counts: { queued: number; running: number; failed: number; interrupted: number; by_status: Record<string, number> };
+  capacity: {
+    class_limits: Record<string, number>;
+    memory_budget_mb: number;
+    memory_reserved_mb: number;
+    running_by_class: Record<string, number>;
+    scheduler: { active: boolean; owner?: string; pid?: number; note?: string };
+  };
   resources: {
     cpu_count: number;
     host_total_mb: number;
@@ -85,6 +86,63 @@ export interface JobsOverview {
     data_dir: string;
     disk_free_gb: number;
   };
+}
+
+export const JOB_ACTIVE = new Set(["queued", "claimed", "running"]);
+
+/** Follow a job until it ends: Server-Sent Events (the browser resumes after a dropped
+ * connection with Last-Event-ID), falling back to polling every 2 s. */
+export function followJob(id: string, onUpdate: (j: Job) => void): () => void {
+  let stopped = false;
+  let es: EventSource | null = null;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const refresh = () =>
+    api
+      .job(id)
+      .then((j) => {
+        if (stopped) return;
+        onUpdate(j);
+        if (!JOB_ACTIVE.has(j.status)) stop();
+      })
+      .catch(() => undefined);
+  const poll = () => {
+    if (!timer) timer = setInterval(refresh, 2000);
+  };
+  const stop = () => {
+    stopped = true;
+    es?.close();
+    if (timer) clearInterval(timer);
+  };
+  try {
+    es = new EventSource(`${API_BASE}/api/jobs/${id}/events`);
+    let errors = 0;
+    es.onmessage = refresh;
+    ["snapshot", "status", "progress", "cancel_requested", "done"].forEach((k) => es?.addEventListener(k, refresh));
+    es.onerror = () => {
+      errors += 1;
+      if (errors > 3) {
+        es?.close();
+        poll();
+      }
+    };
+  } catch {
+    poll();
+  }
+  refresh();
+  return stop;
+}
+
+/** Resolve when a job reaches a final state (used after submitting short jobs). */
+export function waitJob(id: string, onUpdate?: (j: Job) => void): Promise<Job> {
+  return new Promise((resolve) => {
+    const stop = followJob(id, (j) => {
+      onUpdate?.(j);
+      if (!JOB_ACTIVE.has(j.status)) {
+        stop();
+        resolve(j);
+      }
+    });
+  });
 }
 
 /** Error returned by the API: a stable code, one sentence, the field it concerns, the fix. */
@@ -349,17 +407,30 @@ export const api = {
   health: () => fetch(`${API_BASE}/health`).then((r) => j<{ status: string; version: string; offline: boolean; authorization_notice: string; host: string }>(r)),
   recordings: () => fetch(`${API_BASE}/api/recordings`).then((r) => j<{ recordings: Recording[] }>(r)),
   recording: (id: string) => fetch(`${API_BASE}/api/recordings/${id}`).then((r) => j<{ recording: Recording; events: DopplerEvent[]; searches: SearchStatus[] }>(r)),
-  upload: (form: FormData) => fetch(`${API_BASE}/api/recordings`, { method: "POST", body: form }).then((r) => j<{ recording: Recording; warnings: string[] }>(r)),
+  /** Upload; decoding runs as an audio_ingest job (the returned Job). */
+  upload: (form: FormData) => fetch(`${API_BASE}/api/recordings`, { method: "POST", body: form }).then((r) => j<Job>(r)),
   purge: (id: string) => fetch(`${API_BASE}/api/recordings/${id}`, { method: "DELETE" }).then((r) => j<{ recording_id: string; removed: string[] }>(r)),
-  spectrogram: (id: string, q: Record<string, string | number>) => {
+  spectrogram: (id: string, q: Record<string, string | number>, onJob?: (j: Job) => void) => {
     const qs = new URLSearchParams(Object.entries(q).map(([k, v]) => [k, String(v)]));
-    return fetch(`${API_BASE}/api/recordings/${id}/spectrogram?${qs}`).then((r) => j<SpectrogramData>(r));
+    // the first view of a recording queues its spectrogram job (202): follow it, then ask again
+    const get = (): Promise<SpectrogramData> =>
+      fetch(`${API_BASE}/api/recordings/${id}/spectrogram?${qs}`).then(async (r) => {
+        if (r.status === 202) {
+          const job = (await r.json()) as Job;
+          onJob?.(job);
+          const done = await waitJob(job.job_id, onJob);
+          if (done.status !== "succeeded") throw new ApiError(500, done.error?.code ?? "job_failed", done.error?.message ?? `spectrogram job ${done.status}`);
+          return get();
+        }
+        return j<SpectrogramData>(r);
+      });
+    return get();
   },
   events: (id: string) => fetch(`${API_BASE}/api/recordings/${id}/events`).then((r) => j<{ events: DopplerEvent[] }>(r)),
   addEvent: (id: string, body: { points: [number, number][]; harmonic: number; uncertainty_hz: number; annotated_by: string }) =>
     fetch(`${API_BASE}/api/recordings/${id}/events`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => j<{ events: DopplerEvent[] }>(r)),
   detect: (id: string, body: { threshold_z: number; min_duration_s: number; save: boolean }) =>
-    fetch(`${API_BASE}/api/recordings/${id}/events/detect`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => j<{ events: DopplerEvent[]; diagnostics: DetectionDiagnostics }>(r)),
+    fetch(`${API_BASE}/api/recordings/${id}/events/detect`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => j<Job>(r)),
   reviewEvent: (id: string, ev: string, accepted: boolean, note: string | null) =>
     fetch(`${API_BASE}/api/recordings/${id}/events/${ev}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted, note }) }).then((r) =>
       j<{ events: DopplerEvent[] }>(r),
@@ -370,17 +441,16 @@ export const api = {
   datasets: () => fetch(`${API_BASE}/api/flight-datasets`).then((r) => j<{ datasets: FlightDataset[] }>(r)),
   importFlights: (body: Record<string, unknown>) =>
     fetch(`${API_BASE}/api/flight-datasets/import`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) =>
-      j<{ outcome: "created" | "reused" | "exists"; dataset_id: string; job: ImportJob | null }>(r),
+      j<Omit<Job, "outcome"> & { outcome: "created" | "reused" | "exists"; dataset_id: string; job: Job | null }>(r),
     ),
-  imports: () => fetch(`${API_BASE}/api/imports`).then((r) => j<{ imports: ImportJob[] }>(r)),
-  importJob: (id: string) => fetch(`${API_BASE}/api/imports/${id}`).then((r) => j<ImportJob>(r)),
-  importLog: (id: string) => fetch(`${API_BASE}/api/imports/${id}/log?lines=200`).then((r) => j<{ lines: string[] }>(r)),
-  cancelImport: (id: string) => fetch(`${API_BASE}/api/imports/${id}/cancel`, { method: "POST" }).then((r) => j<ImportJob>(r)),
-  retryImport: (id: string) => fetch(`${API_BASE}/api/imports/${id}/retry`, { method: "POST" }).then((r) => j<{ outcome: string; job: ImportJob }>(r)),
-  jobs: () => fetch(`${API_BASE}/api/jobs`).then((r) => j<JobsOverview>(r)),
+  jobs: (q: Record<string, string> = {}) => fetch(`${API_BASE}/api/jobs?${new URLSearchParams(q)}`).then((r) => j<JobsOverview>(r)),
+  job: (id: string, debug = false) => fetch(`${API_BASE}/api/jobs/${id}${debug ? "?debug=true" : ""}`).then((r) => j<Job>(r)),
+  jobLogs: (id: string) => fetch(`${API_BASE}/api/jobs/${id}/logs?lines=300`).then((r) => j<{ lines: string[] }>(r)),
+  cancelJob: (id: string) => fetch(`${API_BASE}/api/jobs/${id}/cancel`, { method: "POST" }).then((r) => j<Job>(r)),
+  retryJob: (id: string) => fetch(`${API_BASE}/api/jobs/${id}/retry`, { method: "POST" }).then((r) => j<Job>(r)),
   createSegment: (id: string, start_s: number, duration_s: number | null) =>
     fetch(`${API_BASE}/api/recordings/${id}/segments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ start_s, duration_s }) }).then((r) =>
-      j<{ recording: Recording; warnings: string[] }>(r),
+      j<Job>(r),
     ),
   createSearch: (body: Record<string, unknown>) => fetch(`${API_BASE}/api/searches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => j<SearchStatus>(r)),
   searches: (rec?: string) => fetch(`${API_BASE}/api/searches${rec ? `?recording_id=${rec}` : ""}`).then((r) => j<{ searches: SearchStatus[] }>(r)),

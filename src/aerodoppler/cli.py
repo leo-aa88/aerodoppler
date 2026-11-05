@@ -98,48 +98,48 @@ def flights_import(
     gap_split_s: float | None = typer.Option(None, "--gap-split-s"),
     offline: bool = typer.Option(False, "--offline"),
 ) -> None:
-    """Download/import one UTC day of flights for a bounding box and normalise to Parquet."""
-    from aerodoppler.adsb.adsblol import AdsbLolProvider, ProviderUnavailable
-    from aerodoppler.adsb.ingest import (
-        ImportRequest,
-        MemoryBudgetExceeded,
-        StorageBudgetExceeded,
-        import_flights,
-    )
-    from aerodoppler.adsb.providers import LocalTraceProvider
+    """Download/import one UTC day of flights for a bounding box and normalise to Parquet.
 
+    Runs as an inline job: it waits for the import slot if another import is running, shows
+    stage progress, and appears on the Jobs page like any other import."""
     s = get_settings()
     bb = BBox.parse(bbox)
-    if provider == "adsblol":
-        prov = AdsbLolProvider(offline=offline or s.offline)
-    elif provider == "local":
-        if path is None:
-            raise typer.BadParameter("--path is required for the local provider")
-        prov = LocalTraceProvider(path, source_label="local")
-    else:
+    if provider not in ("adsblol", "local"):
         raise typer.BadParameter("provider must be adsblol or local")
-    req = ImportRequest(
-        date_utc=date,
-        bbox=bb,
-        margin_km=s.adsb_bbox_margin_km if margin_km is None else margin_km,
-        storage_budget_gb=storage_budget_gb,
-        confirm_download=confirm_download,
-        workers=workers,
-        memory_budget_mb=memory_budget_mb,
-        exclude_jets=exclude_jets,
-        gap_split_s=s.adsb_gap_split_s if gap_split_s is None else gap_split_s,
-    )
+    if provider == "local" and path is None:
+        raise typer.BadParameter("--path is required for the local provider")
+    from aerodoppler.jobs.queue import JobError
+    from aerodoppler.jobs.service import JobRejected, run_inline
+
+    params = {
+        "provider": provider,
+        "local_path": str(path) if path else None,
+        "date_utc": date,
+        "bbox": bb.model_dump(),
+        "margin_km": s.adsb_bbox_margin_km if margin_km is None else margin_km,
+        "storage_budget_gb": storage_budget_gb,
+        "confirm_download": confirm_download,
+        "workers": workers,
+        "memory_budget_mb": memory_budget_mb,
+        "exclude_jets": exclude_jets,
+        "gap_split_s": s.adsb_gap_split_s if gap_split_s is None else gap_split_s,
+    }
+    if offline and not s.offline:
+        from aerodoppler.config import Settings as _S
+
+        s = _S(**{**s.model_dump(), "offline": True})
     try:
-        ds = import_flights(prov, req, s.raw_dir, s.normalized_dir)
-    except StorageBudgetExceeded as e:
-        typer.secho(str(e), fg=typer.colors.YELLOW, err=True)
-        raise typer.Exit(code=3) from e
-    except ProviderUnavailable as e:
-        typer.secho(f"archive unavailable ({e.kind}): {e}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=4) from e
-    except MemoryBudgetExceeded as e:
+        job, _res = run_inline(s, "flight_import", params, log=lambda m: typer.secho(m, err=True))
+    except JobError as e:
+        typer.secho(f"import failed ({e.code}): {e}", fg=typer.colors.RED, err=True)
+        code = {"download_not_confirmed": 3, "memory_budget": 5}.get(e.code, 4)
+        raise typer.Exit(code=code) from e
+    except JobRejected as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=5) from e
+    from aerodoppler.adsb.index import FlightDataset
+
+    ds = FlightDataset(job.result["dataset_id"], s.normalized_dir / job.result["dataset_id"])
     man = ds.manifest()
     typer.echo(
         json.dumps(
@@ -590,6 +590,16 @@ def _summarize_result(res) -> str:
     return json.dumps(out, indent=2, default=str)
 
 
+def _search_job(run_id: str):
+    from aerodoppler.jobs.service import queue_for
+
+    j = queue_for(get_settings()).get(run_id)
+    if j is None or j.type != "geolocation_search":
+        typer.secho("search not found", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    return j
+
+
 @results_app.command("export")
 def results_export(
     run_id: str,
@@ -598,13 +608,14 @@ def results_export(
 ) -> None:
     """Export a run (reproducible JSON / GeoJSON / manifest)."""
     from aerodoppler.api.routes import result_to_geojson
+    from aerodoppler.jobs.runner import INCOMPLETE
     from aerodoppler.models import SearchResult
 
-    job = _store().get_search(run_id)
-    if not job:
-        typer.secho("run not found", fg=typer.colors.RED, err=True)
+    job = _search_job(run_id)
+    d = Path(job.work_dir or "")
+    if (d / INCOMPLETE).exists() or not (d / "result.json").exists():
+        typer.secho(f"no valid result: the search is {job.status}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
-    d = Path(job["result_dir"])
     if format == "manifest":
         text = (d / "manifest.json").read_text()
     else:
@@ -623,21 +634,20 @@ def results_export(
 
 @results_app.command("show")
 def results_show(run_id: str) -> None:
+    from aerodoppler.jobs.runner import INCOMPLETE
     from aerodoppler.models import SearchResult
 
-    job = _store().get_search(run_id)
-    if not job:
-        typer.secho("run not found", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
-    p = Path(job["result_dir"]) / "result.json"
-    if not p.exists():
+    job = _search_job(run_id)
+    d = Path(job.work_dir or "")
+    p = d / "result.json"
+    if not p.exists() or (d / INCOMPLETE).exists():
         typer.echo(
             json.dumps(
                 {
-                    "status": job["status"],
-                    "stage": job["stage"],
-                    "error": job["error"],
-                    "progress": job["progress"],
+                    "status": job.status,
+                    "stage": job.stage,
+                    "error": job.error_message,
+                    "progress": job.progress,
                 },
                 indent=2,
                 default=str,
@@ -649,16 +659,99 @@ def results_show(run_id: str) -> None:
 
 @results_app.command("list")
 def results_list() -> None:
+    from aerodoppler.jobs.service import queue_for
+
+    jobs = queue_for(get_settings()).list(types=["geolocation_search"], limit=500)
     typer.echo(
         json.dumps(
             [
-                {k: j[k] for k in ("id", "recording_id", "status", "stage", "created_at", "error")}
-                for j in _store().list_searches()
+                {
+                    "id": j.id,
+                    "recording_id": j.recording_id,
+                    "status": j.status,
+                    "stage": j.stage,
+                    "created_at": j.created_at,
+                    "error": j.error_message,
+                }
+                for j in jobs
             ],
             indent=2,
             default=str,
         )
     )
+
+
+jobs_app = typer.Typer(help="Inspect and control background jobs (imports, searches, …)")
+app.add_typer(jobs_app, name="jobs")
+
+
+@jobs_app.command("list")
+def jobs_list(
+    status: str | None = typer.Option(None, "--status", help="comma-separated, or 'active'"),
+    type: str | None = typer.Option(None, "--type"),
+    limit: int = typer.Option(30, "--limit"),
+) -> None:
+    """Jobs on this machine, newest first."""
+    from aerodoppler.jobs.queue import ACTIVE
+    from aerodoppler.jobs.service import queue_for
+
+    q = queue_for(get_settings())
+    statuses = list(ACTIVE) if status == "active" else (status.split(",") if status else None)
+    for j in q.list(statuses=statuses, types=type.split(",") if type else None, limit=limit):
+        err = f"  {j.error_message[:90]}" if j.error_message else ""
+        typer.echo(
+            f"{j.id}  {j.type:22} {j.status:12} {str(j.stage)[:24]:24} attempt {j.attempt}/{j.max_attempts}{err}"
+        )
+
+
+@jobs_app.command("show")
+def jobs_show(job_id: str) -> None:
+    from aerodoppler.api.jobs_routes import job_view
+    from aerodoppler.jobs.service import queue_for
+
+    j = queue_for(get_settings()).get(job_id)
+    if j is None:
+        typer.secho("job not found", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(job_view(j, debug=True), indent=2, default=str))
+
+
+@jobs_app.command("cancel")
+def jobs_cancel(job_id: str) -> None:
+    """Cancel a job: queued jobs stop at once; running ones are asked to stop, then terminated."""
+    from aerodoppler.jobs.service import queue_for
+
+    j = queue_for(get_settings()).request_cancel(job_id)
+    if j is None:
+        typer.secho("job not found", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    typer.echo(
+        f"{j.id}: {j.status}{' (cancellation requested)' if j.cancel_requested and j.status != 'cancelled' else ''}"
+    )
+
+
+@jobs_app.command("retry")
+def jobs_retry(job_id: str) -> None:
+    from aerodoppler.jobs.service import queue_for
+
+    j = queue_for(get_settings()).requeue(job_id)
+    if j is None:
+        typer.secho(
+            "only failed, interrupted or cancelled worker jobs can be retried",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    typer.echo(f"{j.id}: queued again")
+
+
+@jobs_app.command("scheduler")
+def jobs_scheduler() -> None:
+    """Run the job scheduler without the web server (e.g. on a headless machine)."""
+    from aerodoppler.jobs.scheduler import run_forever
+
+    _setup_logging(False)
+    run_forever(get_settings())
 
 
 @app.command("serve")
@@ -745,6 +838,9 @@ def benchmark(
     ),
 ) -> None:
     """Run the SYNTHETIC benchmark (default), the semi-synthetic real-trajectory benchmark, or a real-recording manifest benchmark."""
+    import sys as _sys
+
+    from aerodoppler.jobs.service import run_inline
     from aerodoppler.validation.benchmark import (
         SYNTHETIC_CASES,
         run_manifest_benchmark,
@@ -753,49 +849,79 @@ def benchmark(
     )
 
     s = get_settings()
-    echo = lambda m: typer.secho(m, err=True)  # noqa: E731
-    if livermore is not None:
-        from aerodoppler.validation.livermore import run_livermore_benchmark
+    kind = (
+        "livermore"
+        if livermore
+        else "real_trajectories"
+        if real_trajectories
+        else "manifest"
+        if manifest
+        else "synthetic"
+    )
 
-        rep = run_livermore_benchmark(
-            s,
-            livermore,
-            out,
-            [d for d in (datasets or "").split(",") if d],
-            workers=workers,
-            max_cases=max_cases,
-            log=echo,
-        )
-    elif real_trajectories:
-        obs = [
-            (p.split(":")[0], float(p.split(":")[1]), float(p.split(":")[2]))
-            for p in (observers or "").split(";")
-            if p
-        ]
-        rep = run_real_trajectory_benchmark(
-            s,
-            real_trajectories,
-            obs,
-            out,
-            workers=workers,
-            seeds=tuple(int(x) for x in seeds.split(",")),
-            snr_db=snr_db,
-            log=echo,
-            max_assignments=max_assignments,
-            events_k=events_k,
-            oracle_events=oracle_events,
-        )
-    elif manifest is not None:
-        rep = run_manifest_benchmark(s, manifest, out, workers=workers, log=echo)
-    else:
-        sel = (
-            SYNTHETIC_CASES
-            if not cases
-            else [c for c in SYNTHETIC_CASES if c["name"] in set(cases.split(","))]
-        )
-        rep = run_synthetic_benchmark(
-            s, out, cases=sel, workers=workers, mode_b=not no_mode_b, log=echo
-        )
+    def _go(ctx) -> dict:
+        def echo(m: str) -> None:
+            typer.secho(m, err=True)
+            ctx.check_cancel()  # Ctrl-C / SIGTERM / cancel from the Jobs page stop between steps
+
+        if livermore is not None:
+            from aerodoppler.validation.livermore import run_livermore_benchmark
+
+            rep = run_livermore_benchmark(
+                s,
+                livermore,
+                out,
+                [d for d in (datasets or "").split(",") if d],
+                workers=workers,
+                max_cases=max_cases,
+                log=echo,
+            )
+        elif real_trajectories:
+            obs = [
+                (p.split(":")[0], float(p.split(":")[1]), float(p.split(":")[2]))
+                for p in (observers or "").split(";")
+                if p
+            ]
+            rep = run_real_trajectory_benchmark(
+                s,
+                real_trajectories,
+                obs,
+                out,
+                workers=workers,
+                seeds=tuple(int(x) for x in seeds.split(",")),
+                snr_db=snr_db,
+                log=echo,
+                max_assignments=max_assignments,
+                events_k=events_k,
+                oracle_events=oracle_events,
+            )
+        elif manifest is not None:
+            rep = run_manifest_benchmark(s, manifest, out, workers=workers, log=echo)
+        else:
+            sel = (
+                SYNTHETIC_CASES
+                if not cases
+                else [c for c in SYNTHETIC_CASES if c["name"] in set(cases.split(","))]
+            )
+            rep = run_synthetic_benchmark(
+                s, out, cases=sel, workers=workers, mode_b=not no_mode_b, log=echo
+            )
+        return {
+            "out": str(out),
+            "summary": {k: v for k, v in rep.items() if k != "cases"},
+            "_rep": rep,
+        }
+
+    # a benchmark is an inline job: same admission as queued work (it waits for the analysis
+    # slot and memory), a lease and guaranteed finalisation; its searches run as child jobs
+    _job, res = run_inline(
+        s,
+        "benchmark",
+        {"kind": kind, "cli": _sys.argv[1:], "out": str(out)},
+        fn=_go,
+        log=lambda m: typer.secho(m, err=True),
+    )
+    rep = res.pop("_rep")
     typer.echo(json.dumps({k: v for k, v in rep.items() if k != "cases"}, indent=2, default=str))
 
 

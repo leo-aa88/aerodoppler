@@ -169,6 +169,7 @@ class CandidatesResponse(BaseModel):
     synthetic: bool
     confidence_grade: str = "low"
     gates: list[dict[str, Any]] = Field(default_factory=list)
+    alternatives: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PurgeResponse(BaseModel):

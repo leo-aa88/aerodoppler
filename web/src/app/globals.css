@@ -101,3 +101,10 @@ label.event-pick { display: block; color: var(--text); font-size: 13px; margin: 
 .verdict { border-width: 2px; }
 .verdict h2 { margin: 0 0 4px; font-size: 18px; }
 .guide h2 { font-size: 16px; margin: 16px 0 6px; } .guide li { margin: 4px 0; } .guide p, .guide li { max-width: 980px; }
+.bar.indeterminate > div { width: 30%; animation: indet 1.4s ease-in-out infinite; }
+@keyframes indet { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+.stat { padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; }
+.stat b { font-size: 18px; margin-right: 4px; }
+.job-details { padding: 8px 4px; }
+.status.claimed, .status.queued { color: var(--muted); }
+.nav .job-status { color: var(--muted); border: 1px solid var(--border); padding: 2px 8px; border-radius: 10px; }

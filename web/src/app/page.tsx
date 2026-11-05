@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, errText, type FlightDataset, type ImportJob, type Recording } from "@/lib/api";
+import { api, errText, waitJob, type FlightDataset, type Job, type Recording } from "@/lib/api";
 
 type TimeKind = "verified_start" | "date_only" | "date_range" | "upper_bound_only" | "unknown";
 
@@ -41,7 +41,8 @@ function fmtDur(s: number): string {
 export default function ImportPage() {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [datasets, setDatasets] = useState<FlightDataset[]>([]);
-  const [imports, setImports] = useState<ImportJob[]>([]);
+  const [imports, setImports] = useState<Job[]>([]);
+  const [ingesting, setIngesting] = useState<Job | null>(null);
   const [eventsCount, setEventsCount] = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<string>("");
   const [showAllRecs, setShowAllRecs] = useState(false);
@@ -82,29 +83,57 @@ export default function ImportPage() {
       })
       .catch((e) => setErr(errText(e)));
     api.datasets().then((d) => setDatasets(d.datasets)).catch((e) => setErr(errText(e)));
-    api.imports().then((d) => setImports(d.imports)).catch(() => undefined);
+    api
+      .jobs({ type: "flight_import", limit: "20" })
+      .then((d) => setImports(d.jobs))
+      .catch(() => undefined);
   }, []);
   useEffect(refresh, [refresh]);
 
-  const activeImports = imports.filter((j) => j.status === "queued" || j.status === "running");
+  const activeImports = imports.filter((j) => ["queued", "claimed", "running"].includes(j.status));
   // poll while an import runs (the job lives in its own process; a reload simply re-attaches)
   useEffect(() => {
     if (!activeImports.length) return;
     const t = setInterval(() => {
-      api.imports().then((d) => {
+      api.jobs({ type: "flight_import", limit: "20" }).then((d) => {
         const wasActive = activeImports.map((j) => j.id);
-        setImports(d.imports);
-        if (d.imports.some((j) => wasActive.includes(j.id) && j.status === "succeeded")) api.datasets().then((x) => setDatasets(x.datasets));
+        setImports(d.jobs);
+        if (d.jobs.some((j) => wasActive.includes(j.id) && j.status === "succeeded")) api.datasets().then((x) => setDatasets(x.datasets));
       });
     }, 2000);
     return () => clearInterval(t);
   }, [activeImports]);
+  // an audio import still running from before a reload: re-attach to it
+  useEffect(() => {
+    api
+      .jobs({ type: "audio_ingest", status: "active", limit: "5" })
+      .then((d) => {
+        if (d.jobs.length) follow(d.jobs[0]);
+      })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const follow = async (job: Job) => {
+    setIngesting(job);
+    const done = await waitJob(job.job_id, setIngesting);
+    setIngesting(null);
+    if (done.status === "succeeded") {
+      const rid = String(done.result?.recording_id ?? "");
+      const warnings = (done.result?.warnings as string[] | undefined) ?? [];
+      setMsg(`Imported recording ${rid}. ${warnings.join(" ")}`);
+      if (rid) setSelected(rid);
+      refresh();
+    } else {
+      setErr(done.error?.message ?? `the audio import ${done.status}`);
+    }
+  };
 
   const startParsed = useMemo(() => parseZoned(startUtc), [startUtc]);
   const rec = recordings.find((r) => r.id === selected) ?? null;
   const recDate = rec?.recording_date_utc ?? null;
   const dsForRec = rec ? datasets.filter((d) => d.date_utc === recDate && d.synthetic === rec.synthetic) : [];
-  const importForRec = rec ? activeImports.find((j) => j.request.date_utc === recDate) : undefined;
+  const importForRec = rec ? activeImports.find((j) => String(j.params.date_utc) === recDate) : undefined;
 
   // prefill the flight form from the selected recording's day
   useEffect(() => {
@@ -148,10 +177,9 @@ export default function ImportPage() {
     if (notes) fd.append("notes", notes);
     setBusy(true);
     try {
-      const r = await api.upload(fd);
-      setMsg(`Ingested ${r.recording.original_filename} (${fmtDur(r.recording.duration_s)} analysed). ${r.warnings.join(" ")}`);
-      setSelected(r.recording.id);
-      refresh();
+      const job = await api.upload(fd); // uploaded; decoding runs as a job
+      setBusy(false);
+      await follow(job);
     } catch (e) {
       setErr(errText(e));
     } finally {
@@ -164,10 +192,9 @@ export default function ImportPage() {
     setBusy(true);
     try {
       const start = r.segment_start_s + r.duration_s;
-      const out = await api.createSegment(r.id, start, null);
-      setMsg(`Created ${out.recording.id} for ${start.toFixed(0)}–${(start + out.recording.duration_s).toFixed(0)} s of the source. ${out.warnings.join(" ")}`);
-      setSelected(out.recording.id);
-      refresh();
+      const job = await api.createSegment(r.id, start, null);
+      setBusy(false);
+      await follow(job);
     } catch (e) {
       setErr(errText(e));
     } finally {
@@ -191,7 +218,7 @@ export default function ImportPage() {
         local_path: fLocal || null,
       });
       if (r.outcome === "exists") setMsg(`Flights for ${fDate} in this area are already imported (${r.dataset_id}). Nothing to do.`);
-      else if (r.outcome === "reused") setMsg(`An import of this day and area is already running; showing its progress below (nothing new started).`);
+      else if (r.outcome === "reused") setMsg(`An import of this day and area is already queued or running; showing its progress below (nothing new started).`);
       else setMsg(`Import started. It runs in the background: you can leave or reload this page; progress is on the Jobs page.`);
       refresh();
     } catch (e) {
@@ -255,6 +282,11 @@ export default function ImportPage() {
     <div>
       {err && <div className="banner danger">{err}</div>}
       {msg && <div className="banner ok">{msg}</div>}
+      {ingesting && (
+        <div className="banner ok">
+          Importing audio ({ingesting.status}, {ingesting.stage}) — decoding runs in the background; you can leave this page. <Link href="/jobs/">Jobs</Link>
+        </div>
+      )}
       <div className="panel">
         <h2>Getting started</h2>
         {!recordings.length ? (
@@ -434,7 +466,7 @@ export default function ImportPage() {
           </div>
           {activeImports.map((j) => (
             <div key={j.id} className="banner ok small">
-              Importing {j.request.date_utc}: <b>{j.stage}</b>
+              Importing {String(j.params.date_utc)}: <b>{j.stage}</b>
               {(() => {
                 const d = j.progress?.stages?.download as { bytes_done?: number; bytes_total?: number } | undefined;
                 const p = j.progress?.stages?.parse as { files_parsed?: number; aircraft_kept?: number } | undefined;
@@ -450,7 +482,7 @@ export default function ImportPage() {
             .slice(0, 1)
             .map((j) => (
               <div key={j.id} className="banner warn small">
-                Last import of {j.request.date_utc} {j.status}: {j.error} <Link href="/jobs/">retry on the Jobs page</Link>
+                Last import of {String(j.params.date_utc)} {j.status}: {j.error?.message} <Link href="/jobs/">retry on the Jobs page</Link>
               </div>
             ))}
           <h3 style={{ marginTop: 14 }}>Imported flight data</h3>

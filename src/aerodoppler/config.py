@@ -27,9 +27,29 @@ class Settings(BaseSettings):
     offline: bool = Field(default=False, description="Refuse every network access when true")
     max_upload_mb: int = 512
     max_audio_duration_s: float = 7200.0
-    max_concurrent_jobs: int = Field(default=2, description="concurrent search workers")
-    max_concurrent_imports: int = Field(
-        default=1, description="concurrent flight-archive imports (each streams a ~3.5 GB day)"
+    # ---- job scheduler (see docs/jobs.md) ----
+    jobs_max_import: int = Field(default=1, description="concurrent flight-archive imports")
+    jobs_max_analysis: int = Field(default=1, description="concurrent searches/benchmarks")
+    jobs_max_light: int = Field(
+        default=2, description="concurrent ingest/spectrogram/detection jobs"
+    )
+    jobs_memory_budget_mb: float | None = Field(
+        default=None,
+        description="memory all running jobs together may reserve; None = 70 % of the RAM this "
+        "process may use (cgroup/WSL limits included)",
+    )
+    jobs_max_cpu_hours: float = Field(
+        default=12.0, description="CPU-time budget per job (all its processes)"
+    )
+    jobs_min_free_disk_mb: float = Field(
+        default=2000.0, description="jobs stop when free disk drops below this"
+    )
+    jobs_retry_base_s: float = Field(
+        default=30.0,
+        description="first automatic retry delay for transient failures (doubles, max 30 min)",
+    )
+    jobs_scheduler_in_api: bool = Field(
+        default=True, description="run the job scheduler inside `aerodoppler serve`"
     )
     import_memory_budget_mb: float | None = Field(
         default=None,

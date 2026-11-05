@@ -123,7 +123,8 @@ def env(tmp_path):
         extra_manifest={"request": {"date_utc": "2026-11-02", "bbox": [-74.2, 40.6, -73.8, 41.0]}},
     )
     client = TestClient(create_app(s, web_dir=tmp_path / "no-web"))
-    return {
+    client.__enter__()  # runs the lifespan: the job scheduler executes detection jobs
+    yield {
         "c": client,
         "rec": rec,
         "rec_b": rec_b,
@@ -234,10 +235,10 @@ def test_dataset_selection_is_explicit_and_checked(env):
 
 def test_detection_explains_a_stationary_tone(env):
     r = env["c"].post(
-        f"/api/recordings/{env['rec'].id}/events/detect",
+        f"/api/recordings/{env['rec'].id}/events/detect?wait_s=60",
         json={"threshold_z": 2.5, "min_duration_s": 40, "save": False},
     )
-    assert r.status_code == 200, r.text
+    assert r.status_code == 201, r.text  # finished within wait_s (a ridge_detection job)
     d = r.json()["diagnostics"]
     assert d["scanned"]["t_start_s"] == pytest.approx(0.0, abs=5) and d["scanned"]["t_end_s"] > 100
     assert "whole recording" in d["scanned"]["note"]

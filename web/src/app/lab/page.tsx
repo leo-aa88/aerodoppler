@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plot } from "@/components/Plot";
-import { api, errText, fmtNum, type DetectionDiagnostics, type DopplerEvent, type EventAssessment, type Recording, type SpectrogramData } from "@/lib/api";
+import { api, errText, fmtNum, waitJob, type DetectionDiagnostics, type DopplerEvent, type EventAssessment, type Job, type Recording, type SpectrogramData } from "@/lib/api";
 
 // Okabe–Ito colour-blind-safe palette; every ridge is drawn on a black halo so it stays
 // visible on any colormap (the old 1.5 px cyan line vanished on blue/bright backgrounds).
@@ -94,10 +94,11 @@ function Lab() {
       setForm({ t0: v.t0.toFixed(0), t1: v.t1.toFixed(0), f0: v.f0.toFixed(0), f1: v.f1.toFixed(0) });
       setBusy(true);
       api
-        .spectrogram(rec, { ...v, layer, max_frames: 1200, max_bins: 700 })
+        .spectrogram(rec, { ...v, layer, max_frames: 1200, max_bins: 700 }, (j) => setInfo(`Computing the spectrogram (first view of this recording; ${j.status}${j.stage ? `, ${j.stage}` : ""})…`))
         .then((s) => {
           setSpec(s);
           setErr(null);
+          setInfo((m) => (m && m.startsWith("Computing the spectrogram") ? null : m));
         })
         .catch((e) => setErr(errText(e)))
         .finally(() => setBusy(false));
@@ -282,20 +283,49 @@ function Lab() {
     setErr(null);
     setInfo(null);
     try {
-      const r = await api.detect(rec, { threshold_z: thr, min_duration_s: minDur, save: true });
-      setDiag(r.diagnostics);
-      const evs = await loadEvents();
-      if (r.events.length) {
-        setInfo(`${r.events.length} candidate event(s) proposed — check each one's evidence label below before using it.`);
-        const first = evs.find((e) => e.id === r.events[0].id);
-        if (first) zoomTo(first);
-      }
+      const job = await api.detect(rec, { threshold_z: thr, min_duration_s: minDur, save: true });
+      await finishDetection(job);
     } catch (e) {
       setErr(errText(e));
     } finally {
       setBusy(false);
     }
   };
+
+  // detection runs as a job: follow it (also after a page reload) and show its diagnostics
+  const finishDetection = async (job: Job) => {
+    setInfo(`Detecting ridges over the whole recording… (${job.status})`);
+    const done = await waitJob(job.job_id, (j) => setInfo(`Detecting ridges over the whole recording… (${j.status}${j.stage ? `, ${j.stage}` : ""})`));
+    if (done.status !== "succeeded") {
+      setInfo(null);
+      setErr(done.error?.message ?? `detection ${done.status}`);
+      return;
+    }
+    setDiag((done.result?.diagnostics as DetectionDiagnostics) ?? null);
+    const ids = (done.result?.event_ids as string[] | undefined) ?? [];
+    const evs = await loadEvents();
+    if (ids.length) {
+      setInfo(`${ids.length} candidate event(s) proposed — check each one's evidence label below before using it.`);
+      const first = evs.find((e) => e.id === ids[0]);
+      if (first) zoomTo(first);
+    } else {
+      setInfo(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!rec) return;
+    api
+      .jobs({ type: "ridge_detection", status: "active", recording_id: rec, limit: "1" })
+      .then((d) => {
+        if (d.jobs.length) {
+          setBusy(true);
+          finishDetection(d.jobs[0]).finally(() => setBusy(false));
+        }
+      })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rec]);
 
   const review = async (ev: DopplerEvent, accepted: boolean) => {
     try {

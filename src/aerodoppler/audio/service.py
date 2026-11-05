@@ -29,6 +29,10 @@ class NotFound(KeyError):
     pass
 
 
+class RecordingBusy(RuntimeError):
+    pass
+
+
 def _shift_iso(iso: str, seconds: float) -> str:
     t = dt.datetime.fromisoformat(iso.replace("Z", "+00:00")) + dt.timedelta(seconds=seconds)
     return t.astimezone(dt.UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -156,6 +160,30 @@ def segment_notice(rec: Recording) -> str | None:
         f"(limit {rec.duration_s / 60:.0f} min per analysis copy). Event times are relative to "
         f"{a:.0f} s into the file; create another segment to analyse the rest."
     )
+
+
+def recording_warnings(rec: Recording) -> list[str]:
+    warnings = []
+    note = segment_notice(rec)
+    if note:
+        warnings.append(note)
+    if rec.time_basis == "upper_bound_only":
+        warnings.append(
+            f"only an upper bound on the date is known (recorded on or before "
+            f"{rec.date_latest_utc}); flight matching needs the UTC day, so a search is not "
+            "possible until the day is established"
+        )
+    elif rec.time_basis == "date_range":
+        warnings.append(
+            f"the day is only known to lie between {rec.date_earliest_utc} and "
+            f"{rec.date_latest_utc}; each candidate day needs its own ~3.5 GB flight archive"
+        )
+    elif rec.time_basis == "unknown":
+        warnings.append(
+            "no recording date or time: flight matching needs at least the UTC day "
+            "(unknown-time mode) or the UTC start time (known-time mode)"
+        )
+    return warnings
 
 
 def create_segment(
@@ -378,7 +406,38 @@ def purge_recording(store: Store, settings: Settings, rec_id: str) -> dict[str, 
     d = store.recording_dir(rec_id)
     if d is None:
         raise NotFound(rec_id)
+    from aerodoppler.jobs.queue import ACTIVE, SqliteJobQueue
+
+    q = SqliteJobQueue(settings.db_path)
+    active = q.list(recording_id=rec_id, statuses=list(ACTIVE))
+    if active:
+        raise RecordingBusy(
+            f"{len(active)} job(s) of this recording are still queued or running "
+            f"({', '.join(j.id for j in active)}); cancel them first"
+        )
     removed = []
+    jobs_root = (settings.data_dir / "jobs").resolve()
+    for j in q.list(recording_id=rec_id, limit=10000):
+        wd = Path(j.work_dir) if j.work_dir else None
+        if (
+            wd
+            and wd.exists()
+            and (
+                wd.resolve().is_relative_to(settings.runs_dir.resolve())
+                or wd.resolve().is_relative_to(jobs_root)
+            )
+        ):
+            shutil.rmtree(wd, ignore_errors=True)
+            removed.append(str(wd))
+    with q._conn() as c:
+        ids = [r["id"] for r in c.execute("SELECT id FROM jobs WHERE recording_id=?", (rec_id,))]
+        c.execute(
+            "DELETE FROM job_events WHERE job_id IN (SELECT id FROM jobs WHERE recording_id=?)",
+            (rec_id,),
+        )
+        c.execute("DELETE FROM jobs WHERE recording_id=?", (rec_id,))
+    if ids:
+        store.audit("jobs.purge", rec_id, {"jobs": ids})
     for run_dir in store.delete_searches_for_recording(rec_id):
         if run_dir.exists() and run_dir.resolve().is_relative_to(settings.runs_dir.resolve()):
             shutil.rmtree(run_dir, ignore_errors=True)

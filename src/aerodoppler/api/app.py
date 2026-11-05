@@ -38,21 +38,40 @@ def resolve_web_dir() -> Path | None:
 def create_app(settings: Settings | None = None, web_dir: Path | None = None) -> FastAPI:
     settings = settings or get_settings()
     settings.ensure_dirs()
+    from contextlib import asynccontextmanager
+
+    from aerodoppler.api.jobs_routes import router as jobs_router
+    from aerodoppler.jobs.scheduler import Scheduler
+    from aerodoppler.jobs.service import queue_for
+
+    store = Store(settings.db_path)
+    # the job queue; the one-time migration copies pre-queue search/import rows into it
+    queue = queue_for(settings)
+
+    @asynccontextmanager
+    async def lifespan(app_: FastAPI):
+        sched = None
+        if settings.jobs_scheduler_in_api:
+            # reconciles jobs left by a previous server or machine crash on its first tick:
+            # dead workers never keep a slot, their rows are kept as "interrupted"
+            sched = Scheduler(settings, queue).start()
+            app_.state.scheduler = sched
+        try:
+            yield
+        finally:
+            if sched is not None:
+                sched.stop()  # workers are separate processes and keep running
+
     app = FastAPI(
         title="AeroDoppler",
         version=__version__,
         description="Consent-based aircraft-Doppler acoustic geolocation (local-first research tool).",
+        lifespan=lifespan,
     )
     app.state.settings = settings
-    app.state.store = Store(settings.db_path)
-    # reconcile jobs whose workers died with the previous server/machine before anything
-    # reads job state (dead PIDs never hold slots; rows are kept as "interrupted")
-    from aerodoppler.jobs.imports import reconcile_stale_imports
-    from aerodoppler.jobs.runner import reconcile_stale_jobs
-
-    lost = reconcile_stale_jobs(app.state.store) + reconcile_stale_imports(app.state.store)
-    if lost:
-        log.warning("marked %d jobs interrupted (their workers are gone): %s", len(lost), lost)
+    app.state.store = store
+    app.state.queue = queue
+    app.include_router(jobs_router)
     app.include_router(router)
     app.add_exception_handler(RequestValidationError, validation_handler)  # type: ignore[arg-type]
     # The Next.js dev server (`make web-dev`) runs on a different origin from the API; allow

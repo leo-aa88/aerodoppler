@@ -40,7 +40,11 @@ before committing; a lint warning that "an unsafe fix is available" is still a f
 - `src/aerodoppler/search/` — event features, candidate funnel (`preselect.py`), scoring
   (`score.py`), silence term, refinement, ranking and confidence gates (`rank.py`), orchestration
   (`engine.py`).
-- `src/aerodoppler/api/`, `jobs/`, `cli.py` — FastAPI, SQLite store + subprocess job runner, Typer CLI.
+- `src/aerodoppler/api/`, `cli.py` — FastAPI (`api/jobs_routes.py` for `/api/jobs`), Typer CLI.
+- `src/aerodoppler/jobs/` — persistent SQLite job queue (`queue.py`), job types (`handlers.py`),
+  scheduler (`scheduler.py`), worker process (`worker.py`), submission/inline/migration
+  (`service.py`), search execution (`runner.py`), recordings/events store (`store.py`). See
+  `docs/jobs.md`. Long work never runs inside a request handler: submit a job instead.
 - `src/aerodoppler/validation/` — scenarios, demo, benchmarks (synthetic, real-trajectory, Livermore).
 - `web/` — Next.js UI. `tests/unit|integration|e2e/`. `scripts/` — screenshots, release smoke test.
 
@@ -93,7 +97,10 @@ before committing; a lint warning that "an unsafe fix is available" is still a f
 - The version lives only in `src/aerodoppler/__init__.py`; releases stamp it from the git tag
   (see `CONTRIBUTING.md` → Releases). Do not hard-code versions elsewhere.
 - Search runs use `multiprocessing` with `fork`; heavy benchmarks on real traffic take 10–25 min
-  and several GB of RAM.
+  and several GB of RAM. Forked helpers inherit signal handlers: a handler installed in a job
+  process must check `os.getpid()` (multiprocessing stops pools with SIGTERM to the children).
+- Job status lives in the `jobs` table; never infer a live worker from a `running` row. Use
+  `scheduler.worker_alive` (PID + creation time + command line) and the lease.
 
 ## Commits
 

@@ -48,3 +48,16 @@ def test_offsets_respect_every_event():
         assert np.all(np.abs(offs) >= max(20.0, 0.5 * dur))
         cov = np.minimum(c1 - offs, b) - np.maximum(c0 - offs, a)
         assert np.all(cov >= 0.4 * dur - 1e-9)
+
+
+def test_per_event_nulls_when_shared_bands_do_not_overlap():
+    """Regression (synthetic short_sep_300): windows of 300 s and 500 s have admissible bands
+    ~150-210 s and ~250-330 s; no single shared shift satisfies both, but each event's own null
+    is well defined."""
+    ctx = _ctx(1500.0, [(100.0, 400.0), (700.0, 1200.0)])
+    ext = [(70.0, 430.0), (670.0, 1230.0)]
+    shared, diag = SearchEngine._null_offsets(ctx, seed=0, extents=ext)
+    assert shared.size == 0 and diag["band"] is None
+    for i in (0, 1):
+        offs, d = SearchEngine._null_offsets(ctx, seed=i, extents=ext, event_index=i)
+        assert offs.size == 48, d

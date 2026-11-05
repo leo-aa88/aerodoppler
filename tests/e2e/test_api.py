@@ -21,7 +21,7 @@ pytestmark = pytest.mark.slow
 @pytest.fixture(scope="module")
 def api(tmp_path_factory):
     root = tmp_path_factory.mktemp("api")
-    settings = Settings(data_dir=root, offline=True, max_concurrent_jobs=1)
+    settings = Settings(data_dir=root, offline=True)
     settings.ensure_dirs()
     spec = ScenarioSpec(name="api", seed=5, snr_db=12.0, duration_s=1500.0)
     sc = build_scenario(spec, root / "scenario", settings.normalized_dir, settings.dem_dir)
@@ -45,7 +45,7 @@ def test_full_flow(api):
     wav = Path(sc.wav_path)
     with open(wav, "rb") as fh:
         r = c.post(
-            "/api/recordings",
+            "/api/recordings?wait_s=120",
             files={"file": (wav.name, fh, "audio/wav")},
             data={
                 "owner_permission_confirmed": "true",
@@ -53,15 +53,22 @@ def test_full_flow(api):
                 "synthetic": "true",
             },
         )
-    assert r.status_code == 201, r.text
+    assert r.status_code == 201, r.text  # the audio_ingest job finished within wait_s
+    assert r.json()["job"]["type"] == "audio_ingest"
     rec = r.json()["recording"]
     rid = rec["id"]
     assert rec["synthetic"] is True and rec["sha256"]
-    # spectrogram view (downsampled)
-    r = c.get(
-        f"/api/recordings/{rid}/spectrogram",
-        params={"t0": 0, "t1": 600, "f0": 20, "f1": 500, "max_frames": 300, "max_bins": 200},
-    )
+    # spectrogram view (downsampled): first access queues the spectrogram job (202)
+    params = {"t0": 0, "t1": 600, "f0": 20, "f1": 500, "max_frames": 300, "max_bins": 200}
+    r = c.get(f"/api/recordings/{rid}/spectrogram", params=params)
+    if r.status_code == 202:
+        spec_job = r.json()["job_id"]
+        deadline = time.time() + 120
+        while c.get(f"/api/jobs/{spec_job}").json()["status"] not in ("succeeded", "failed"):
+            assert time.time() < deadline
+            time.sleep(0.5)
+        assert c.get(f"/api/jobs/{spec_job}").json()["status"] == "succeeded"
+        r = c.get(f"/api/recordings/{rid}/spectrogram", params=params)
     assert r.status_code == 200
     sp = r.json()
     assert len(sp["times"]) <= 300 and len(sp["freqs"]) <= 200 and sp["synthetic"] is True
@@ -77,9 +84,10 @@ def test_full_flow(api):
     assert c.post(f"/api/recordings/{rid}/events", json={"points": [[1.0, 2.0]]}).status_code == 422
     # automatic proposals
     r = c.post(
-        f"/api/recordings/{rid}/events/detect", json={"threshold_z": 2.5, "min_duration_s": 40}
+        f"/api/recordings/{rid}/events/detect?wait_s=120",
+        json={"threshold_z": 2.5, "min_duration_s": 40},
     )
-    assert r.status_code == 200
+    assert r.status_code == 201, r.text
     from aerodoppler.audio.service import pick_event_pair
     from aerodoppler.models import DopplerEvent
 
@@ -104,11 +112,14 @@ def test_full_flow(api):
     r = c.post("/api/searches", json=body)
     assert r.status_code == 202, r.text
     run_id = r.json()["id"]
-    # concurrency cap: a second job is rejected while the first runs
+    # the identical request while it is queued/running returns the same search (no duplicate)
     r2 = c.post("/api/searches", json=body)
-    assert r2.status_code in (429, 202)
-    if r2.status_code == 202:
-        c.post(f"/api/searches/{r2.json()['id']}/cancel")
+    assert r2.status_code == 202 and r2.json()["id"] == run_id
+    # a different search waits in the queue (analysis slot = 1) and can be cancelled there
+    other = {**body, "quality_settings": {"workers": 2, "coarse_grid_m": 400}}
+    r3 = c.post("/api/searches", json=other)
+    assert r3.status_code == 202 and r3.json()["id"] != run_id
+    assert c.post(f"/api/searches/{r3.json()['id']}/cancel").status_code in (200, 409)
     deadline = time.time() + 600
     status = None
     while time.time() < deadline:

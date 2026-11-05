@@ -18,13 +18,13 @@ export function Nav() {
   const path = usePathname();
   const [health, setHealth] = useState<{ version: string; offline: boolean; host: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [active, setActive] = useState(0);
+  const [jc, setJc] = useState<{ running: number; queued: number; failed: number } | null>(null);
   useEffect(() => {
     api.health().then((h) => setHealth(h)).catch((e) => setErr(String(e)));
     const poll = () =>
       api
-        .jobs()
-        .then((j) => setActive(j.counts.searches_active + j.counts.imports_active))
+        .jobs({ limit: "1" })
+        .then((j) => setJc({ running: j.counts.running, queued: j.counts.queued, failed: j.counts.failed + j.counts.interrupted }))
         .catch(() => undefined);
     poll();
     const t = setInterval(poll, 5000);
@@ -36,10 +36,19 @@ export function Nav() {
       {links.map(([href, label]) => (
         <Link key={href} href={href} className={path === href || (href !== "/" && path?.startsWith(href)) ? "active" : ""}>
           {label}
-          {href === "/jobs/" && active > 0 && <span className="count" title="jobs running">{active}</span>}
+          {href === "/jobs/" && jc && jc.running + jc.queued > 0 && (
+            <span className="count" title="jobs running and queued">
+              {jc.running + jc.queued}
+            </span>
+          )}
         </Link>
       ))}
       <span className="spacer" />
+      {jc && (
+        <Link href="/jobs/" className="small job-status">
+          {jc.running} running · {jc.queued} queued · {jc.failed} failed
+        </Link>
+      )}
       <span className="muted small">
         {health ? `local API v${health.version} on ${health.host}${health.offline ? " · OFFLINE" : ""}` : err ? `API not reachable at ${API_BASE || (typeof window !== "undefined" ? window.location.origin : "")} (${err}) — start it with \`make serve\`` : "connecting…"}
       </span>

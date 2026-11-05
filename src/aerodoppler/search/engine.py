@@ -1079,26 +1079,28 @@ class SearchEngine:
         # then compared the score with a meaningless null. Now the sample count is reported
         # and the gate fails visibly when too few valid offsets exist.
         extents = self._curve_extents(ctx, winner, full.t0_abs)
-        offsets, null_diag = self._null_offsets(ctx, seed, extents)
-        null_mean, null_std, null_n = [], [], []
-        if offsets.size:
-            null = _score_point(
-                ctx,
-                winner.assignment,
-                winner.observer_ecef,
-                coarse=False,
-                taus=winner.assignment.tau,
-                t0_override=full.t0_abs + offsets,
-            )
-            for arr in null.per_event_shift_scores:
+        # one null per event: each event's own curve misaligned against its own window. (A
+        # single shared shift would have to satisfy every event's band at once; with windows of
+        # different lengths those bands barely overlap or not at all.)
+        null_mean, null_std, null_n, null_diag = [], [], [], []
+        for i in range(len(full.per_event)):
+            offs_i, diag_i = self._null_offsets(ctx, seed + i, extents, event_index=i)
+            null_diag.append(diag_i)
+            a = np.array([])
+            if offs_i.size and extents[i] is not None:
+                null = _score_point(
+                    ctx,
+                    winner.assignment,
+                    winner.observer_ecef,
+                    coarse=False,
+                    taus=winner.assignment.tau,
+                    t0_override=full.t0_abs + offs_i,
+                )
+                arr = null.per_event_shift_scores[i]
                 a = arr[np.isfinite(arr) & (arr > -5)]
-                null_n.append(int(a.size))
-                null_mean.append(float(a.mean()) if a.size else 0.0)
-                null_std.append(float(a.std()) if a.size > 1 else 1.0)
-        else:
-            null_n = [0] * len(full.per_event)
-            null_mean = [0.0] * len(full.per_event)
-            null_std = [1.0] * len(full.per_event)
+            null_n.append(int(a.size))
+            null_mean.append(float(a.mean()) if a.size else 0.0)
+            null_std.append(float(a.std()) if a.size > 1 else 1.0)
         # rival with different flights
         wset = set(winner.assignment.seg_idx)
         riv = [r.total for r in rivals if set(r.assignment.seg_idx) != wset]
@@ -1125,9 +1127,6 @@ class SearchEngine:
             null_mean=null_mean,
             null_std=null_std,
             null_n=null_n,
-            null_offset_range_s=(float(np.abs(offsets).min()), float(np.abs(offsets).max()))
-            if offsets.size
-            else None,
             null_diagnostics=null_diag,
             event_evidence=[assess_event(ev, ctx.c.c_mps) for ev in ctx.events],
             event_flags=[list(f.flags) for f in ctx.feats],
@@ -1161,6 +1160,7 @@ class SearchEngine:
         ctx: EngineContext,
         seed: int,
         extents: list[tuple[float, float] | None] | None = None,
+        event_index: int | None = None,
         n_wanted: int = 48,
         min_coverage: float = 0.4,
         min_offset_s: float = 20.0,
@@ -1180,6 +1180,8 @@ class SearchEngine:
         windows = [(float(f.t_start_s), float(f.t_end_s)) for f in ctx.feats]
         if extents is None:
             extents = [(a - 30.0, b + 30.0) for a, b in windows]
+        if event_index is not None:  # this event's null only
+            windows, extents = [windows[event_index]], [extents[event_index]]
         reach = max(
             [(e[1] - e[0]) + (b - a) for e, (a, b) in zip(extents, windows, strict=True) if e]
             or [t_hi - t_lo]
