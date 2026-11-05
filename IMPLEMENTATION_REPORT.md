@@ -595,9 +595,28 @@ cap", Mode B assignment cap) because it string-matched "exceed the cap"; all cap
 search as not exhaustive. (4) A grid over the point cap raised a raw ValueError; it is now an
 explicit input error. (5) Searches never run silently over every imported archive: datasets are
 resolved to the recording's day and kind (real/SYNTHETIC); mixing or other days need an explicit
-development override; an area outside the data is refused. **Before/after benchmark numbers for
-(1)–(3) and the evidence gate are pending** (synthetic and Livermore re-runs started after this
-commit); until then the 2026-11-04 tables above describe the previous gate version.
+development override; an area outside the data is refused. Before/after on the Livermore real-recording benchmark (`docs/livermore_benchmark_2026-11-05.json`,
+code `d1f39a9`, which also carries the per-event null fix described in the job-queue section):
+accuracy unchanged (18 answered / 11 abstained, top-1 median 391 m, identical per-case errors);
+grades on the 18 answered single-pass cases:
+
+| grade | 2026-11-04 (ten gates) | 2026-11-05 (single-event clock rule, evidence gate, per-event null) |
+|---|---|---|
+| high | 3 (167, 315, 466 m — all the right aircraft) | **0** |
+| medium | 3 (85 m; 3,127 m right aircraft; 3,389 m wrong aircraft) | 6 (the same 3 + the former highs) |
+| low | 12 (median 364 m) | 12 (unchanged) |
+
+The three former highs became medium only because of the single-event clock rule (one pass
+cannot corroborate its own clock); no event failed the new evidence gate (all real Livermore
+events show a Doppler transition); no answered case has a "not estimable" null any more (the 6.7 km
+wrong answer, previously not estimable, now gets 41 null samples and still fails core_matches on
+coverage, 35 %). Medium still contains two answers > 3 km, so on single-pass recordings medium is
+not a location guarantee either. Synthetic re-run (`docs/synthetic_benchmark_2026-11-05.json`,
+same code): identical to 2026-11-04 — Mode A errors equal case by case (median 31.2 m, p90
+45.0 m, max 53.0 m, 12/12 within 300 m, 12/12 correct pairs), grades 9 high / 3 medium (same
+cases, same reasons); Mode B median 7.3 m, 12 high (two events per search, so the clock rule
+does not apply). This run was itself executed through the new job system as an inline
+`benchmark` job with its 24 searches as child jobs.
 
 **UI.** Guided Import page (readiness checklist, time-basis choice with live UTC conversion,
 segment controls, live import progress that survives reloads), Jobs page, Spectrogram lab

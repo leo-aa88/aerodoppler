@@ -152,7 +152,7 @@ details and the known degeneracies.
   diversity): Mode A (unknown time) top-1 error median 31 m, p90 45 m, max 53 m, 12/12 correct
   flight pairs, no false matches, grades 9 high / 3 medium; Mode B (known time ±10 s) median 7 m.
   Measures the inverse engine, not real-world accuracy (`IMPLEMENTATION_REPORT.md` §M7; raw JSON
-  in `docs/synthetic_benchmark_2026-11-04.json`).
+  in `docs/synthetic_benchmark_2026-11-05.json`).
 * **Semi-synthetic benchmark** on real ADSB.lol trajectories (central Florida, 2026-11-02,
   ~1,250 real segments as distractors, real USGS 3DEP terrain, simulated audio; 12 sites × 2
   seeds, 22 answered): with blind event detection 7/22 top-1 within 300 m (median 13.6 km); with
@@ -165,10 +165,10 @@ details and the known degeneracies.
   18 answered / 11 abstained; answered top-1 median **391 m**, best-of-top-3 median 179 m,
   correct aircraft 83 %; over all 29 incl. abstained candidates top-1 median 466 m, 55 % within
   500 m, 38 % beyond 1 km (mostly the mirror solution of a single pass). Details and the per-case
-  table in `IMPLEMENTATION_REPORT.md` §M7; raw JSON in `docs/livermore_benchmark_2026-11-04.json`.
-  The ten-gate confidence grade marks the mirror solutions low or medium; the 3 answers graded
-  high are all the right aircraft (worst 466 m), but that is 3 cases, and the grades remain a
-  warning system, not a guarantee.
+  table in `IMPLEMENTATION_REPORT.md` §M7; raw JSON in `docs/livermore_benchmark_2026-11-05.json`.
+  A single pass cannot corroborate its own clock, so none of these single-pass answers is graded
+  high any more: 6 medium (85–466 m with the right aircraft, plus 3.1 km and 3.4 km answers) and
+  12 low. The grades remain a warning system, not a guarantee.
   `aerodoppler benchmark --manifest cases.json` runs the same protocol on your own consented
   recordings. Every score remains labelled uncalibrated.
 
