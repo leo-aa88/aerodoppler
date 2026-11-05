@@ -346,3 +346,25 @@ def test_oversized_queued_job_does_not_block_smaller_ones(tmp_path):
     Scheduler(s, q).fail_oversized(Capacity({"light": 2}, 1000.0))
     j = q.get(big.id)
     assert j.status == "failed" and j.error_code == "insufficient_memory"
+
+
+def test_worker_sigterm_handler_never_touches_the_database(tmp_path):
+    """SIGTERM can arrive while the worker's own thread holds a SQLite write transaction; the
+    handler must return at once (a DB write there waited on its own lock for the 30 s busy
+    timeout and stalled the scheduler). The supervisor thread records the request instead."""
+    from aerodoppler.jobs import worker as W
+
+    q = _q(tmp_path)
+    _submit(q)
+    j = q.claim_next(CAP)
+    job = q.start(j.id, j.worker_token, os.getpid(), None, "h")
+    sup = W.Supervisor(q, job, Settings(data_dir=tmp_path, offline=True), j.worker_token)
+    handler = W.term_handler(os.getpid())
+    t0 = time.monotonic()
+    with q._tx():  # this thread holds the write lock, as during a progress update
+        handler(15, None)
+    assert time.monotonic() - t0 < 1.0
+    assert not q.get(j.id).cancel_requested and not sup.cancel.is_set()
+    sup.on_term_flag()
+    assert sup.cancel.is_set() and q.get(j.id).cancel_requested
+    assert "SIGTERM" in (sup.reason or "")

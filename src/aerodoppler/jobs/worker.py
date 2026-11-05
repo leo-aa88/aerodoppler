@@ -40,6 +40,13 @@ CURRENT_JOB: contextvars.ContextVar[Job | None] = contextvars.ContextVar(
 )
 
 HEARTBEAT_S = 5.0
+SIGNAL_POLL_S = 0.25
+
+# Set by the worker's SIGTERM handler. A signal handler runs between two bytecodes of the main
+# thread, possibly inside a SQLite write transaction of that same thread: it must not touch
+# the database (a second connection would wait on the lock its own thread holds — up to the
+# 30 s busy timeout, stalling the scheduler too). The supervisor thread acts on this flag.
+_term_requested = False
 RETRY_BASE_S = 30.0
 RETRY_MAX_S = 1800.0
 
@@ -134,10 +141,25 @@ class Supervisor:
             )
             self.cancel.set()
 
+    def on_term_flag(self) -> None:
+        """Turn a SIGTERM (seen as ``_term_requested``) into a recorded cancellation request
+        and the handler's cancel flag, from this thread, not from the signal handler."""
+        global _term_requested
+        if not _term_requested:
+            return
+        _term_requested = False
+        self.reason = self.reason or "cancelled by operator (SIGTERM)"
+        self.cancel.set()
+        self.queue.request_cancel(self.job.id)
+
     def _loop(self) -> None:
-        while not self._stop.wait(HEARTBEAT_S):
+        last = time.time()
+        while not self._stop.wait(SIGNAL_POLL_S):
             try:
-                self.beat()
+                self.on_term_flag()
+                if time.time() - last >= HEARTBEAT_S:
+                    last = time.time()
+                    self.beat()
             except Exception:  # never let the watchdog kill the job
                 log.exception("heartbeat failed")
 
@@ -237,6 +259,18 @@ def execute(
     return status, result
 
 
+def term_handler(main_pid: int):
+    def on_term(signum: int, frame: object) -> None:
+        global _term_requested
+        # forked helpers (the search engine's scoring pool) inherit this handler, and
+        # multiprocessing stops its pool with SIGTERM: a child just exits
+        if os.getpid() != main_pid:
+            os._exit(0)
+        _term_requested = True  # no I/O, no locks here (see _term_requested)
+
+    return on_term
+
+
 def _cleanup_tmp(work_dir: Path) -> None:
     """Remove only this job's scratch space (never shared downloads or datasets)."""
     shutil.rmtree(work_dir / "tmp", ignore_errors=True)
@@ -263,19 +297,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 3
 
-    # SIGTERM = please stop: recorded as a cancellation request, which the heartbeat turns
-    # into the handler's cancel flag within one beat; the scheduler follows with SIGKILL
-    main_pid = os.getpid()
-
-    def on_term(signum: int, frame: object) -> None:
-        # forked helpers (the search engine's scoring pool) inherit this handler, and
-        # multiprocessing stops its pool with SIGTERM: only the worker process itself may turn
-        # SIGTERM into a cancellation request; a child just exits
-        if os.getpid() != main_pid:
-            os._exit(0)
-        queue.request_cancel(job_id)
-
-    signal.signal(signal.SIGTERM, on_term)
+    # SIGTERM = please stop: the supervisor thread records it as a cancellation request and
+    # sets the handler's cancel flag within SIGNAL_POLL_S; the scheduler follows with SIGKILL
+    signal.signal(signal.SIGTERM, term_handler(os.getpid()))
     log.info("job %s (%s) started, attempt %d", job.id, job.type, job.attempt)
     status, _ = execute(queue, settings, job, token)
     log.info("job %s finished: %s", job.id, status)
