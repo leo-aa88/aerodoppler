@@ -227,18 +227,19 @@ def assess_event(ev: DopplerEvent, c_mps: float = 343.0) -> dict:
     ff = np.array([p.frequency_hz for p in pts])
     lo, hi = float(ff.min()), float(ff.max())
     if (hi - lo) / max(float(np.median(ff)), 1e-6) >= DOPPLER_MIN_EXCURSION:
-        between = int(np.sum((ff > lo + 0.2 * (hi - lo)) & (ff < hi - 0.2 * (hi - lo))))
-        if between < 3:
-            # a real pass sweeps through the intermediate frequencies; points only at two levels
-            # are a jump between steady lines (e.g. harmonics of one constant sound)
+        # a real pass sweeps continuously through every frequency between its plateaus; points
+        # sitting on a few discrete levels are jumps between steady lines (e.g. the harmonics of
+        # a constant engine), whatever the size of the "drop"
+        occupied = int(np.unique(np.minimum((ff - lo) / (hi - lo) * 12, 11).astype(int)).size)
+        if occupied < 6:
             return {
                 "label": "tonal_only",
                 "reasons": [
-                    f"the frequency drop ({hi:.1f} → {lo:.1f} Hz) is never measured: {between} "
-                    "ridge point(s) between the two levels — a jump between steady lines (e.g. "
-                    "harmonics of a constant sound), not a continuous Doppler sweep"
+                    f"the frequency drop ({hi:.1f} → {lo:.1f} Hz) is not a continuous sweep: the "
+                    f"ridge points occupy only {occupied} of 12 frequency bands between the two "
+                    "ends — jumps between steady lines (e.g. harmonics of a constant sound)"
                 ],
-                "metrics": {"n_points": len(pts), "points_in_transition": between},
+                "metrics": {"n_points": len(pts), "bands_occupied_of_12": occupied},
                 "review": review,
             }
     f = np.array([p.frequency_hz for p in pts], dtype=float)

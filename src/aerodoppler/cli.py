@@ -821,6 +821,11 @@ def benchmark(
         None, "--datasets", help="comma-separated dataset ids for --livermore"
     ),
     max_cases: int | None = typer.Option(None, "--max-cases"),
+    negatives: bool = typer.Option(
+        False,
+        "--negatives",
+        help="SYNTHETIC hard-negative benchmark: non-aircraft sounds must not become Doppler evidence",
+    ),
     oracle_events: bool = typer.Option(
         False,
         "--oracle-events",
@@ -850,7 +855,9 @@ def benchmark(
 
     s = get_settings()
     kind = (
-        "livermore"
+        "negatives"
+        if negatives
+        else "livermore"
         if livermore
         else "real_trajectories"
         if real_trajectories
@@ -864,7 +871,12 @@ def benchmark(
             typer.secho(m, err=True)
             ctx.check_cancel()  # Ctrl-C / SIGTERM / cancel from the Jobs page stop between steps
 
-        if livermore is not None:
+        if negatives:
+            from aerodoppler.validation.negatives import run_negative_benchmark
+
+            rep = run_negative_benchmark(s, out, workers=workers or 4, log=echo)
+            rep = {**rep["summary"], "cases": rep["clips"]}
+        elif livermore is not None:
             from aerodoppler.validation.livermore import run_livermore_benchmark
 
             rep = run_livermore_benchmark(
