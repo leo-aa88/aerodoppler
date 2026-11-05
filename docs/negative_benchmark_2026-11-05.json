@@ -1,0 +1,338 @@
+{
+  "summary": {
+    "label": "SYNTHETIC HARD-NEGATIVE BENCHMARK \u2014 generated stand-ins for non-aircraft sounds",
+    "negatives": 12,
+    "negative_clips_with_doppler_evidence": 0,
+    "negative_doppler_events": 0,
+    "negative_searches_not_refused_or_abstained": [],
+    "negative_searches_graded_above_low": [],
+    "positives": 3,
+    "positive_true_passes_found": [
+      2,
+      2,
+      2
+    ],
+    "positive_search": [
+      {
+        "result": "answered (high)",
+        "grade": "high",
+        "abstention_reason": null,
+        "top1_error_m": 7.306669786889949
+      },
+      {
+        "result": "answered (high)",
+        "grade": "high",
+        "abstention_reason": null,
+        "top1_error_m": 7.306669786889949
+      },
+      {
+        "result": "answered (high)",
+        "grade": "high",
+        "abstention_reason": null,
+        "top1_error_m": 19.638543907822978
+      }
+    ]
+  },
+  "clips": [
+    {
+      "clip": "mains_hum",
+      "kind": "negative",
+      "proposals": 0,
+      "labels": {},
+      "doppler_events": 0,
+      "rejected": {},
+      "search": {
+        "result": "refused before search",
+        "reason": "0 usable event(s), 2 needed"
+      },
+      "seconds": 8.5,
+      "notes": {
+        "recording_id": "rec_a7bdb68b83fc"
+      }
+    },
+    {
+      "clip": "held_tones",
+      "kind": "negative",
+      "proposals": 1,
+      "labels": {
+        "tonal_only": 1
+      },
+      "doppler_events": 0,
+      "rejected": {
+        "stationary_tone": 5,
+        "steady_tones_joined": 1
+      },
+      "search": {
+        "result": "refused before search",
+        "reason": "0 usable event(s), 2 needed"
+      },
+      "seconds": 10.8,
+      "notes": {
+        "recording_id": "rec_9c62e4ef03cf"
+      }
+    },
+    {
+      "clip": "melody",
+      "kind": "negative",
+      "proposals": 2,
+      "labels": {
+        "tonal_only": 2
+      },
+      "doppler_events": 0,
+      "rejected": {
+        "too_short": 38
+      },
+      "search": {
+        "result": "refused before search",
+        "reason": "0 usable event(s), 2 needed"
+      },
+      "seconds": 11.8,
+      "notes": {
+        "recording_id": "rec_a34c1ecadec6"
+      }
+    },
+    {
+      "clip": "speech_like",
+      "kind": "negative",
+      "proposals": 0,
+      "labels": {},
+      "doppler_events": 0,
+      "rejected": {
+        "too_short": 2
+      },
+      "search": {
+        "result": "refused before search",
+        "reason": "0 usable event(s), 2 needed"
+      },
+      "seconds": 11.4,
+      "notes": {
+        "recording_id": "rec_fc057b20d5a2"
+      }
+    },
+    {
+      "clip": "wind",
+      "kind": "negative",
+      "proposals": 0,
+      "labels": {},
+      "doppler_events": 0,
+      "rejected": {},
+      "search": {
+        "result": "refused before search",
+        "reason": "0 usable event(s), 2 needed"
+      },
+      "seconds": 11.8,
+      "notes": {
+        "recording_id": "rec_59f0c1677361"
+      }
+    },
+    {
+      "clip": "rising_chirps",
+      "kind": "negative",
+      "proposals": 5,
+      "labels": {
+        "tonal_only": 5
+      },
+      "doppler_events": 0,
+      "rejected": {
+        "too_short": 1
+      },
+      "search": {
+        "result": "refused before search",
+        "reason": "0 usable event(s), 2 needed"
+      },
+      "seconds": 19.0,
+      "notes": {
+        "recording_id": "rec_ea42ec706966"
+      }
+    },
+    {
+      "clip": "siren",
+      "kind": "negative",
+      "proposals": 0,
+      "labels": {},
+      "doppler_events": 0,
+      "rejected": {},
+      "search": {
+        "result": "refused before search",
+        "reason": "0 usable event(s), 2 needed"
+      },
+      "seconds": 16.0,
+      "notes": {
+        "recording_id": "rec_9a139805a66c"
+      }
+    },
+    {
+      "clip": "engine_idle",
+      "kind": "negative",
+      "proposals": 3,
+      "labels": {
+        "tonal_only": 3
+      },
+      "doppler_events": 0,
+      "rejected": {
+        "stationary_tone": 15,
+        "too_short": 30,
+        "steady_tones_joined": 3
+      },
+      "search": {
+        "result": "refused before search",
+        "reason": "0 usable event(s), 2 needed"
+      },
+      "seconds": 16.8,
+      "notes": {
+        "recording_id": "rec_06619962451b"
+      }
+    },
+    {
+      "clip": "spin_down",
+      "kind": "negative",
+      "proposals": 1,
+      "labels": {
+        "tonal_only": 1
+      },
+      "doppler_events": 0,
+      "rejected": {
+        "steady_tones_joined": 1
+      },
+      "search": {
+        "result": "refused before search",
+        "reason": "0 usable event(s), 2 needed"
+      },
+      "seconds": 15.5,
+      "notes": {
+        "recording_id": "rec_567aa1fec309"
+      }
+    },
+    {
+      "clip": "ground_vehicle",
+      "kind": "negative",
+      "proposals": 0,
+      "labels": {},
+      "doppler_events": 0,
+      "rejected": {
+        "too_short": 6
+      },
+      "search": {
+        "result": "refused before search",
+        "reason": "0 usable event(s), 2 needed"
+      },
+      "seconds": 14.9,
+      "notes": {
+        "recording_id": "rec_df230b7dfe83"
+      }
+    },
+    {
+      "clip": "noise_suppressed",
+      "kind": "negative",
+      "proposals": 0,
+      "labels": {},
+      "doppler_events": 0,
+      "rejected": {},
+      "search": {
+        "result": "refused before search",
+        "reason": "0 usable event(s), 2 needed"
+      },
+      "seconds": 13.6,
+      "notes": {
+        "recording_id": "rec_7c16994a9b36"
+      }
+    },
+    {
+      "clip": "mp3_artifacts",
+      "kind": "negative",
+      "proposals": 0,
+      "labels": {},
+      "doppler_events": 0,
+      "rejected": {},
+      "search": {
+        "result": "refused before search",
+        "reason": "0 usable event(s), 2 needed"
+      },
+      "seconds": 11.5,
+      "notes": {
+        "recording_id": "rec_27ca77887ba6"
+      }
+    },
+    {
+      "clip": "pos_10db",
+      "kind": "positive",
+      "proposals": 4,
+      "labels": {
+        "plausible_doppler": 2,
+        "tonal_only": 2
+      },
+      "doppler_events": 2,
+      "rejected": {
+        "weak": 2,
+        "stationary_tone": 5,
+        "too_short": 26,
+        "steady_tones_joined": 3
+      },
+      "search": {
+        "result": "answered (high)",
+        "grade": "high",
+        "abstention_reason": null,
+        "top1_error_m": 7.306669786889949
+      },
+      "seconds": 298.6,
+      "notes": {
+        "recording_id": "rec_0a5524cf2119",
+        "true_passes_with_plausible_event": 2
+      }
+    },
+    {
+      "clip": "pos_4db",
+      "kind": "positive",
+      "proposals": 3,
+      "labels": {
+        "plausible_doppler": 2,
+        "tonal_only": 1
+      },
+      "doppler_events": 2,
+      "rejected": {
+        "stationary_tone": 2,
+        "too_short": 23,
+        "weak": 1,
+        "steady_tones_joined": 1
+      },
+      "search": {
+        "result": "answered (high)",
+        "grade": "high",
+        "abstention_reason": null,
+        "top1_error_m": 7.306669786889949
+      },
+      "seconds": 308.8,
+      "notes": {
+        "recording_id": "rec_447097c9d71c",
+        "true_passes_with_plausible_event": 2
+      }
+    },
+    {
+      "clip": "pos_0db",
+      "kind": "positive",
+      "proposals": 3,
+      "labels": {
+        "plausible_doppler": 2,
+        "tonal_only": 1
+      },
+      "doppler_events": 2,
+      "rejected": {
+        "too_short": 12,
+        "weak": 1,
+        "stationary_tone": 1,
+        "steady_tones_joined": 1
+      },
+      "search": {
+        "result": "answered (high)",
+        "grade": "high",
+        "abstention_reason": null,
+        "top1_error_m": 19.638543907822978
+      },
+      "seconds": 270.1,
+      "notes": {
+        "recording_id": "rec_b1bcc1f6f80a",
+        "true_passes_with_plausible_event": 2
+      }
+    }
+  ]
+}

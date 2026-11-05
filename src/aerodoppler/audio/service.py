@@ -275,7 +275,7 @@ def propose_events(
     events = ridges_to_events(ridges, spec, rec_id)
     n_tracked = len(events)
     if template:
-        for te in flyovers_to_events(spec, detect_flyovers(spec), rec_id):
+        for te in flyovers_to_events(spec, detect_flyovers(spec), rec_id, rejected=rejected):
             overlap = any(
                 min(e.audio_end_s, te.audio_end_s) - max(e.audio_start_s, te.audio_start_s)
                 > 0.5 * (te.audio_end_s - te.audio_start_s)
@@ -296,6 +296,7 @@ _REJECT_TEXT = {
     "too_short": "shorter than the minimum duration",
     "weak": "too faint (mean whitened level below the minimum)",
     "stationary_tone": "frequency almost constant (hum, machinery, a held note — or a plateau)",
+    "steady_tones_joined": "two steady lines joined by a jump while one keeps sounding (a constant source's harmonics), not a sweep",
 }
 
 

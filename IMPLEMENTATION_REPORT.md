@@ -695,6 +695,50 @@ transient retries with a limit; API restart + event reconnection; inline admissi
 SIGKILLed inline CLI process reconciled; no starvation of a large job by a stream of small ones;
 forked-pool regression).
 
+### Hard negatives 2026-11-05 — non-aircraft sounds must not become evidence (observed)
+
+`aerodoppler benchmark --negatives` (`validation/negatives.py`) generates twelve SYNTHETIC
+10-minute stand-ins for sounds that are not aircraft — mains hum, held tones with a harmonic
+switch, melody, speech-like formants, wind, rising chirps, a siren, an engine idling with a
+harmonic staircase, a spin-down, a ground vehicle pass-by, noise-suppressed audio and a
+24 kbit/s MP3 round trip — and runs each through the real ingest, detection and evidence
+assessment, then (with search) through the search. Three SYNTHETIC aircraft scenes (10 / 4 /
+0 dB) are positive controls. Two failure classes were found and closed:
+
+* a steady tone switching harmonics (360 → 180 Hz) was fitted by the template detector as a
+  Doppler drop and labelled *plausible*. New detector rejection `steady_tones_joined`: two flat
+  parts joined by a jump while one line persists (±1.5 %) is reported as a rejected candidate;
+* a staircase of steady lines (an idling engine, 216 / 186 / 155 Hz) passed the evidence check.
+  New evidence rule: when a template-fit event drops by ≥ 3 %, its strong points (z ≥ 3) must
+  occupy at least 6 of 12 frequency bands across the drop; otherwise it is *tonal only*
+  ("not a continuous sweep").
+
+| run | negative clips with Doppler evidence | negative Doppler events | positives: true passes found (10/4/0 dB) | positive searches |
+|---|---|---|---|---|
+| before the two rules (detection only) | 1 (`held_tones`) | 1 | 2 / 2 / 2 | — |
+| after (detection + search, `docs/negative_benchmark_2026-11-05.json`) | 0 | 0 | 2 / 2 / 2 | high at 7.3 / 7.3 / 19.6 m |
+
+All twelve negative clips were refused before search (no usable event). The 0 dB positive had
+three *plausible* events before and two after: the third was an edge artefact whose fitted CPA
+lies before the recording start. Controls on earlier benchmarks:
+
+* SYNTHETIC benchmark (`docs/synthetic_benchmark_2026-11-05_hardneg.json` vs
+  `docs/synthetic_benchmark_2026-11-05.json`): identical in all 24 case/mode results (Mode A
+  12/12 answered, median 31.2 m, max 53.0 m; Mode B 12/12, median 7.3 m, max 69.9 m). Its
+  runtimes are not comparable — the machine was shared and one search hung 28 min in the
+  scoring-pool shutdown fixed in bab9b0d. The `git_sha` in that file is the branch head when the
+  file was written; the run used the hard-negative code before the anytime screen was committed.
+* Livermore real recordings: identical — 29 cases, 18 answered, 11 abstained (weak fit), the
+  same per-case errors (median 390.5 m) and the same correct-flight rate (0.83).
+* Semi-synthetic real-trajectory manual events: 66 / 66 still *plausible*.
+
+A real 2-hour public street livestream (not committed) was a further check: the previous rules
+labelled three of its template-fit events *plausible*; each follows a faint steady line and
+jumps to another (78 → 36, 68 → 45, 97 → 68 Hz), i.e. the staircase class. With the new rules
+all nine detected events are *tonal only* and the search is refused. No aircraft Doppler sweep
+is visible anywhere in its 0–400 Hz spectrogram, so refusing is the correct outcome there; this
+is one recording, not a measured false-positive rate.
+
 ### Final test summary (observed, final code)
 
 ```
