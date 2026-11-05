@@ -283,3 +283,32 @@ def test_inline_progress_never_reaches_stdout(tmp_path, capsys):
     out = capsys.readouterr()
     assert job.status == "succeeded"
     assert out.out == "" and job.id in out.err
+
+
+def test_spectrogram_reservation_covers_measured_peak():
+    """Regression: a 2-hour recording's spectrogram job reserved 2.1 GB, used 4.3 GB and was
+    killed by the memory guard. Measured peaks: 1.6 GB / 3.1 GB / 6.0 GB for 30 / 60 / 120 min."""
+    from aerodoppler.jobs.handlers import JOB_TYPES
+
+    s = Settings(offline=True)
+    for dur, measured_mb in ((1800, 1614), (3600, 3076), (7200, 5960)):
+        for t in ("spectrogram_generation", "ridge_detection"):
+            assert JOB_TYPES[t].memory_mb(s, {"duration_s": dur}, 30_000) >= measured_mb
+
+
+def test_retry_recomputes_the_memory_reservation(tmp_path):
+    from aerodoppler.jobs.service import retry_job
+
+    s = Settings(data_dir=tmp_path, offline=True)
+    q = SqliteJobQueue(s.db_path)
+    j, _ = q.submit(
+        "spectrogram_generation",
+        {"recording_id": "r", "duration_s": 7200},
+        resource_class="light",
+        memory_mb=2099,
+    )
+    q.finish(
+        j.id, None, "failed", error_code="budget_exceeded", error_message="memory budget exceeded"
+    )
+    j2 = retry_job(s, q, j.id)
+    assert j2.status == "queued" and j2.memory_mb > 6000
