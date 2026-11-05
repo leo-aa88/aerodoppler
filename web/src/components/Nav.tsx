@@ -9,15 +9,26 @@ const links = [
   ["/lab/", "Spectrogram lab"],
   ["/search/", "Search"],
   ["/results/", "Results"],
+  ["/jobs/", "Jobs"],
   ["/data/", "Data & privacy"],
+  ["/guide/", "Guide"],
 ];
 
 export function Nav() {
   const path = usePathname();
   const [health, setHealth] = useState<{ version: string; offline: boolean; host: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [active, setActive] = useState(0);
   useEffect(() => {
     api.health().then((h) => setHealth(h)).catch((e) => setErr(String(e)));
+    const poll = () =>
+      api
+        .jobs()
+        .then((j) => setActive(j.counts.searches_active + j.counts.imports_active))
+        .catch(() => undefined);
+    poll();
+    const t = setInterval(poll, 5000);
+    return () => clearInterval(t);
   }, []);
   return (
     <nav className="nav">
@@ -25,6 +36,7 @@ export function Nav() {
       {links.map(([href, label]) => (
         <Link key={href} href={href} className={path === href || (href !== "/" && path?.startsWith(href)) ? "active" : ""}>
           {label}
+          {href === "/jobs/" && active > 0 && <span className="count" title="jobs running">{active}</span>}
         </Link>
       ))}
       <span className="spacer" />

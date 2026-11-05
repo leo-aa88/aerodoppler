@@ -19,6 +19,96 @@ export interface Recording {
   created_at: string;
   synthetic: boolean;
   notes: string | null;
+  source_duration_s: number | null;
+  truncated: boolean;
+  segment_start_s: number;
+  parent_recording_id: string | null;
+  source_start_time_utc: string | null;
+  time_basis: "verified_start" | "date_only" | "date_range" | "upper_bound_only" | "unknown";
+  date_earliest_utc: string | null;
+  date_latest_utc: string | null;
+}
+
+export interface ImportJob {
+  kind: "import";
+  id: string;
+  created_at: string;
+  updated_at: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+  stage: string | null;
+  request: { provider?: string; date_utc: string; bbox: { west: number; south: number; east: number; north: number }; margin_km?: number; exclude_jets?: boolean };
+  progress: {
+    stage?: string;
+    stages?: Record<string, Record<string, unknown>>;
+    summary?: Record<string, unknown>;
+    storage_bytes?: number;
+    resources?: Record<string, unknown>;
+    details?: Record<string, unknown>;
+  };
+  dataset_id: string | null;
+  error: string | null;
+  error_kind: string | null;
+  cancel_requested: boolean;
+  heartbeat_at: number | null;
+  peak_rss_mb: number | null;
+  stalled: boolean;
+  worker_alive: boolean;
+}
+
+export interface SearchJobSummary {
+  kind: "search";
+  id: string;
+  recording_id: string;
+  recording: string | null;
+  status: string;
+  stage: string | null;
+  created_at: string;
+  updated_at: string;
+  error: string | null;
+  progress: SearchStatus["progress"];
+  stalled: boolean;
+  mode: string | null;
+}
+
+export interface JobsOverview {
+  searches: SearchJobSummary[];
+  imports: ImportJob[];
+  counts: { searches_active: number; searches_limit: number; imports_active: number; imports_limit: number };
+  resources: {
+    cpu_count: number;
+    host_total_mb: number;
+    host_available_mb: number;
+    cgroup_limit_mb: number | null;
+    effective_limit_mb: number;
+    effective_available_mb: number;
+    wsl: boolean;
+    data_dir: string;
+    disk_free_gb: number;
+  };
+}
+
+/** Error returned by the API: a stable code, one sentence, the field it concerns, the fix. */
+export class ApiError extends Error {
+  status: number;
+  code: string;
+  field?: string;
+  action?: string;
+  constructor(status: number, code: string, message: string, field?: string, action?: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.field = field;
+    this.action = action;
+  }
+  toString(): string {
+    return this.action ? `${this.message} → ${this.action}` : this.message;
+  }
+}
+
+export function errText(e: unknown): string {
+  if (e instanceof ApiError) return e.toString();
+  if (e instanceof TypeError) return `the local API is not reachable (${e.message}); start it with \`make serve\``;
+  return String(e instanceof Error ? e.message : e);
 }
 
 export interface RidgePoint {
@@ -39,6 +129,65 @@ export interface DopplerEvent {
   detection_quality: number;
   annotated_by: string | null;
   ridge_harmonic: number;
+  extra?: Record<string, unknown>;
+  assessment?: EventAssessment | null;
+}
+
+export interface EventAssessment {
+  label: "plausible_doppler" | "weak_doppler" | "tonal_only";
+  reasons: string[];
+  metrics: {
+    duration_s?: number;
+    n_points?: number;
+    f_mean_hz?: number;
+    f_range_hz?: number;
+    excursion_pct?: number;
+    descent_pct?: number;
+    max_slope_hz_per_s?: number;
+    steepest_point_s?: number;
+    plateaus_reached?: boolean;
+    monotonic?: boolean;
+    harmonics_seen?: number;
+    implied_radial_speed_mps?: number;
+  };
+  review?: { accepted: boolean; note: string | null; at: string } | null;
+}
+
+export interface SearchEstimate {
+  datasets: string[];
+  dataset_warnings: string[];
+  area_km2: number;
+  grid_points: number;
+  segments_in_window_and_area: number;
+  segments_cap: number;
+  assignment_cap: number;
+  workers: number;
+  memory_budget_mb: number;
+  within_caps: boolean;
+  notes: string[];
+  reference_run: string;
+}
+
+export interface RejectedCandidate {
+  t_start_s: number;
+  t_end_s: number;
+  f_mean_hz: number;
+  f_range_hz: number;
+  mean_z: number;
+  reasons: string[];
+  reason_text: string;
+}
+
+export interface DetectionDiagnostics {
+  scanned: { t_start_s: number; t_end_s: number; f_min_hz: number; f_max_hz: number; note: string };
+  parameters: Record<string, number>;
+  proposals: number;
+  from_ridge_tracker: number;
+  from_template_fit: number;
+  evidence_labels: Record<string, number>;
+  rejected_counts: Record<string, number>;
+  rejected: RejectedCandidate[];
+  suggestions: string[];
 }
 
 export interface SpectrogramData {
@@ -180,14 +329,18 @@ export interface Track {
 
 async function j<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    let detail = res.statusText;
+    let body: { detail?: unknown } | null = null;
     try {
-      const body = await res.json();
-      detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail ?? body);
+      body = await res.json();
     } catch {
-      /* ignore */
+      /* not JSON */
     }
-    throw new Error(`${res.status}: ${detail}`);
+    const d = body?.detail;
+    if (d && typeof d === "object" && "message" in (d as Record<string, unknown>)) {
+      const o = d as { code?: string; message: string; field?: string; action?: string };
+      throw new ApiError(res.status, o.code ?? "error", o.message, o.field, o.action);
+    }
+    throw new ApiError(res.status, "error", typeof d === "string" ? d : res.statusText || `HTTP ${res.status}`);
   }
   return (await res.json()) as T;
 }
@@ -206,10 +359,29 @@ export const api = {
   addEvent: (id: string, body: { points: [number, number][]; harmonic: number; uncertainty_hz: number; annotated_by: string }) =>
     fetch(`${API_BASE}/api/recordings/${id}/events`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => j<{ events: DopplerEvent[] }>(r)),
   detect: (id: string, body: { threshold_z: number; min_duration_s: number; save: boolean }) =>
-    fetch(`${API_BASE}/api/recordings/${id}/events/detect`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => j<{ events: DopplerEvent[] }>(r)),
+    fetch(`${API_BASE}/api/recordings/${id}/events/detect`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => j<{ events: DopplerEvent[]; diagnostics: DetectionDiagnostics }>(r)),
+  reviewEvent: (id: string, ev: string, accepted: boolean, note: string | null) =>
+    fetch(`${API_BASE}/api/recordings/${id}/events/${ev}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted, note }) }).then((r) =>
+      j<{ events: DopplerEvent[] }>(r),
+    ),
+  estimateSearch: (body: Record<string, unknown>) =>
+    fetch(`${API_BASE}/api/searches/estimate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => j<SearchEstimate>(r)),
   deleteEvent: (id: string, ev: string) => fetch(`${API_BASE}/api/recordings/${id}/events/${ev}`, { method: "DELETE" }).then((r) => j<{ deleted: string }>(r)),
   datasets: () => fetch(`${API_BASE}/api/flight-datasets`).then((r) => j<{ datasets: FlightDataset[] }>(r)),
-  importFlights: (body: Record<string, unknown>) => fetch(`${API_BASE}/api/flight-datasets/import`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => j<Record<string, unknown>>(r)),
+  importFlights: (body: Record<string, unknown>) =>
+    fetch(`${API_BASE}/api/flight-datasets/import`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) =>
+      j<{ outcome: "created" | "reused" | "exists"; dataset_id: string; job: ImportJob | null }>(r),
+    ),
+  imports: () => fetch(`${API_BASE}/api/imports`).then((r) => j<{ imports: ImportJob[] }>(r)),
+  importJob: (id: string) => fetch(`${API_BASE}/api/imports/${id}`).then((r) => j<ImportJob>(r)),
+  importLog: (id: string) => fetch(`${API_BASE}/api/imports/${id}/log?lines=200`).then((r) => j<{ lines: string[] }>(r)),
+  cancelImport: (id: string) => fetch(`${API_BASE}/api/imports/${id}/cancel`, { method: "POST" }).then((r) => j<ImportJob>(r)),
+  retryImport: (id: string) => fetch(`${API_BASE}/api/imports/${id}/retry`, { method: "POST" }).then((r) => j<{ outcome: string; job: ImportJob }>(r)),
+  jobs: () => fetch(`${API_BASE}/api/jobs`).then((r) => j<JobsOverview>(r)),
+  createSegment: (id: string, start_s: number, duration_s: number | null) =>
+    fetch(`${API_BASE}/api/recordings/${id}/segments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ start_s, duration_s }) }).then((r) =>
+      j<{ recording: Recording; warnings: string[] }>(r),
+    ),
   createSearch: (body: Record<string, unknown>) => fetch(`${API_BASE}/api/searches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => j<SearchStatus>(r)),
   searches: (rec?: string) => fetch(`${API_BASE}/api/searches${rec ? `?recording_id=${rec}` : ""}`).then((r) => j<{ searches: SearchStatus[] }>(r)),
   search: (id: string) => fetch(`${API_BASE}/api/searches/${id}`).then((r) => j<SearchStatus>(r)),

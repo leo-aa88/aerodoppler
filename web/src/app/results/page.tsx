@@ -4,7 +4,109 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { MapView } from "@/components/MapView";
 import { Plot } from "@/components/Plot";
-import { api, fmtNum, type Candidate, type CandidatesResponse, type Curves, type SearchStatus, type SpectrogramData, type Track } from "@/lib/api";
+import { api, errText, fmtNum, type Candidate, type CandidatesResponse, type Curves, type SearchStatus, type SpectrogramData, type Track } from "@/lib/api";
+
+const GATE_TEXT: Record<string, string> = {
+  core_matches: "every event fits clearly better than chance",
+  clock_lock: "the events agree on one recording clock",
+  margin: "no comparably good answer with different aircraft",
+  margin_distinct_location: "no comparably good answer ≥ 1 km away",
+  no_unheard_close_pass: "no loud aircraft passed close without being heard",
+  radius: "the best-scoring region is compact",
+  track_support: "the aircraft tracks really cover the matched passes",
+  search_complete: "the search did not discard a comparable candidate",
+  sensitivity_stable: "the answer survives speed-of-sound and height perturbations",
+  event_shape: "the events show both Doppler plateaus",
+  event_evidence: "every event shows a real Doppler transition",
+};
+
+function Verdict({ res }: { res: CandidatesResponse }) {
+  const abst = res.abstention?.abstained;
+  const grade = abst ? "abstain" : (res.confidence_grade ?? "low");
+  const gates = [...(res.gates ?? [])].sort((a, b) => Number(a.passed) - Number(b.passed));
+  const failed = gates.filter((g) => !g.passed);
+  const cls = grade === "high" ? "ok" : grade === "medium" ? "warn" : "danger";
+  const headline: Record<string, string> = {
+    abstain: "No answer: the search abstained",
+    low: "LOW — the coordinates below are NOT a verified location",
+    medium: "MEDIUM — a plausible hypothesis, not an established location",
+    high: "HIGH — every check passed (still an uncalibrated relative fit, not a probability)",
+  };
+  return (
+    <div className={`banner verdict ${cls}`}>
+      <h2>{headline[grade]}</h2>
+      {abst && (
+        <div>
+          <b>{res.abstention?.reason}</b>: {res.abstention?.detail}
+          {res.candidates.length > 0 && " The best candidates found are listed below for inspection only."}
+        </div>
+      )}
+      {!abst && grade !== "high" && failed.length > 0 && (
+        <div>
+          Not established because: {failed.map((g) => GATE_TEXT[g.name] ?? g.name).join("; ")} — {failed.length === 1 ? "this check" : "these checks"} failed. Treat the ranked
+          positions as hypotheses to verify, not as where the recording was made.
+        </div>
+      )}
+      {res.alternatives?.length ? (
+        <div style={{ margin: "6px 0 0 0" }}>
+          <b>Ambiguous:</b> the top answer does not clearly beat {res.alternatives.length} other location{res.alternatives.length > 1 ? "s" : ""} (within 0.5 z, ≥ 1 km apart): read it as one of{" "}
+          {res.alternatives.map((a, i) => (
+            <span key={i}>
+              {i > 0 ? "; " : ""}
+              <code>
+                {a.lat.toFixed(4)}, {a.lon.toFixed(4)}
+              </code>{" "}
+              ({(a.distance_from_top1_m / 1000).toFixed(1)} km away, −{a.gap_z.toFixed(2)} z, {a.icao24.join("+")})
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <details style={{ marginTop: 6 }}>
+        <summary className="small">all checks ({gates.filter((g) => g.passed).length} of {gates.length} passed)</summary>
+        <ul className="small" style={{ margin: "6px 0 0 16px" }}>
+          {gates.map((g) => (
+            <li key={g.name}>
+              {g.passed ? "✓" : "✗"} <b>{GATE_TEXT[g.name] ?? g.name}</b> <code>{g.name}</code> — {g.detail}
+            </li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  );
+}
+
+function Context({ status, res }: { status: SearchStatus; res: CandidatesResponse | null }) {
+  const r = status.request as {
+    mode?: string;
+    start_utc?: string | null;
+    start_uncertainty_s?: number | null;
+    date_utc?: string | null;
+    bbox?: { west: number; south: number; east: number; north: number };
+    flight_dataset_ids?: string[];
+  };
+  return (
+    <div className="panel small">
+      <div className="kv">
+        <div>time assumption</div>
+        <div>
+          {r.mode === "known-time"
+            ? `known start ${r.start_utc} ± ${r.start_uncertainty_s} s (taken as given — a wrong start time matches the wrong aircraft)`
+            : `UTC day ${r.date_utc}, time of day unknown (fitted from the event separation)`}
+        </div>
+        <div>search scope</div>
+        <div>
+          {r.bbox
+            ? `bounded to ${r.bbox.west.toFixed(3)}, ${r.bbox.south.toFixed(3)} → ${r.bbox.east.toFixed(3)}, ${r.bbox.north.toFixed(3)}: a location outside this area cannot be found, and if the area came from prior knowledge this is not a blind result`
+            : "blind (no geographic prior)"}
+        </div>
+        <div>flight data</div>
+        <div>{(r.flight_dataset_ids ?? []).join(", ") || "–"}</div>
+        <div>scores</div>
+        <div>{res?.score_label ?? "relative fit score (uncalibrated)"} — differences between candidates matter, absolute values do not</div>
+      </div>
+    </div>
+  );
+}
 
 function Results() {
   const params = useSearchParams();
@@ -19,19 +121,20 @@ function Results() {
   const [spec, setSpec] = useState<SpectrogramData[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [showAllHeat, setShowAllHeat] = useState(false);
+  const [zoomTo, setZoomTo] = useState<{ lat: number; lon: number; key: number } | null>(null);
 
   useEffect(() => {
     api.searches().then((s) => setAll(s.searches)).catch(() => undefined);
   }, []);
   useEffect(() => {
     if (!run) return;
-    api.search(run).then(setStatus).catch((e) => setErr(String(e)));
+    api.search(run).then(setStatus).catch((e) => setErr(errText(e)));
     api.candidates(run)
       .then((c) => {
         setRes(c);
         if (c.candidates.length) setSelected(c.candidates[0].candidate_id);
       })
-      .catch((e) => setErr(String(e)));
+      .catch((e) => setErr(errText(e)));
     api.tracks(run).then(setTracks).catch(() => undefined);
     api.heatmap(run).then((h) => setHeat(h.points)).catch(() => undefined);
   }, [run]);
@@ -49,7 +152,7 @@ function Results() {
         }
         setSpec(views);
       })
-      .catch((e) => setErr(String(e)));
+      .catch((e) => setErr(errText(e)));
   }, [run, selected, status]);
 
   const cand: Candidate | undefined = res?.candidates.find((c) => c.candidate_id === selected);
@@ -97,38 +200,24 @@ function Results() {
       {err && <div className="banner danger">{err}</div>}
       {status && !["succeeded", "abstained"].includes(status.status) && (
         <div className="banner warn">
-          Job status: <span className={`status ${status.status}`}>{status.status}</span> ({status.stage}) {status.error ?? ""} — <Link href={`/search/?rec=${status.recording_id}`}>back to search</Link>
+          Job status: <span className={`status ${status.status}`}>{status.status}</span> ({status.stage}) {status.error ?? ""} — <Link href="/jobs/">jobs</Link> ·{" "}
+          <Link href={`/search/?rec=${status.recording_id}`}>back to search</Link>
         </div>
       )}
-      {res?.abstention?.abstained && (
-        <div className="banner danger">
-          <b>Abstained: {res.abstention.reason}.</b> {res.abstention.detail}
-        </div>
+      {res && (res.abstention?.abstained || res.candidates.length > 0) && (
+        <Verdict res={res} />
       )}
-      {res?.warnings?.length ? <div className="banner warn">{res.warnings.join(" · ")}</div> : null}
-      {res && res.candidates.length > 0 && (
-        <div className={`banner ${res.confidence_grade === "high" ? "ok" : res.confidence_grade === "medium" ? "warn" : "danger"}`}>
-          <b>Confidence grade: {(res.confidence_grade ?? "low").toUpperCase()}</b> (graded verdict from the gates below, not a probability)
-          {res.alternatives?.length ? (
-            <div style={{ margin: "6px 0 0 0" }}>
-              <b>Ambiguous:</b> the top-1 does not clearly beat {res.alternatives.length} other location{res.alternatives.length > 1 ? "s" : ""} (within 0.5 z, ≥ 1 km apart). Read the answer as one of:{" "}
-              {res.alternatives.map((a, i) => (
-                <span key={i}>
-                  {i > 0 ? "; " : ""}
-                  <code>{a.lat.toFixed(5)}, {a.lon.toFixed(5)}</code> ({(a.distance_from_top1_m / 1000).toFixed(1)} km away, −{a.gap_z.toFixed(2)} z, {a.icao24.join("+")})
-                </span>
-              ))}
-            </div>
-          ) : null}
-          <ul className="small" style={{ margin: "6px 0 0 16px" }}>
-            {(res.gates ?? []).map((g) => (
-              <li key={g.name}>
-                {g.passed ? "✓" : "✗"} <code>{g.name}</code> — {g.detail}
-              </li>
+      {status && <Context status={status} res={res} />}
+      {res?.warnings?.length ? (
+        <details className="banner warn small">
+          <summary>{res.warnings.length} warning(s) from the search</summary>
+          <ul>
+            {res.warnings.map((w) => (
+              <li key={w}>{w}</li>
             ))}
           </ul>
-        </div>
-      )}
+        </details>
+      ) : null}
       <div className="panel">
         <h2>
           Run <code>{run}</code> · {res?.score_label} · <span className="muted small">{status?.cpu_seconds ? `CPU ${status.cpu_seconds}s · peak RSS ${status.peak_rss_mb} MB` : ""}</span>
@@ -154,7 +243,7 @@ function Results() {
       <div className="grid2">
         <div className="panel">
           <h3>Map — distinct candidate maxima, flight tracks, score landscape</h3>
-          <MapView candidates={res?.candidates ?? []} tracks={tracks} heat={heatShown} selected={selected} onSelect={setSelected} bbox={bbox ? [bbox.west, bbox.south, bbox.east, bbox.north] : null} />
+          <MapView candidates={res?.candidates ?? []} tracks={tracks} heat={heatShown} selected={selected} onSelect={setSelected} bbox={bbox ? [bbox.west, bbox.south, bbox.east, bbox.north] : null} zoomTo={zoomTo} />
         </div>
         <div className="panel">
           <h3>Ranked hypotheses</h3>
@@ -171,13 +260,27 @@ function Results() {
                 <th>inferred start (UTC)</th>
                 <th>f0 (Hz)</th>
                 <th>grid</th>
-                <th>landscape ±</th>
+                <th title="radius of the region whose score stays within 0.15 z of the best — uncalibrated, not a confidence interval">score plateau (uncal.)</th>
               </tr>
             </thead>
             <tbody>
               {res?.candidates.map((c) => (
                 <tr key={c.candidate_id} className={`clickable ${c.candidate_id === selected ? "selected" : ""}`} onClick={() => setSelected(c.candidate_id)}>
-                  <td>{c.rank}</td>
+                  <td>
+                    {c.rank}
+                    <div>
+                      <button
+                        className="small-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelected(c.candidate_id);
+                          setZoomTo({ lat: c.lat, lon: c.lon, key: Date.now() });
+                        }}
+                      >
+                        zoom
+                      </button>
+                    </div>
+                  </td>
                   <td>
                     {c.lat.toFixed(5)}, {c.lon.toFixed(5)}
                     <br />
@@ -246,7 +349,11 @@ function Results() {
               data.push({ type: "scatter", mode: "markers", x: ev.observed_ridge.t_rel_s, y: ev.observed_ridge.frequency_hz, marker: { color: "#ef476f", size: 3 }, name: `observed ridge (h=${ev.observed_ridge.harmonic})` });
               return (
                 <div key={ev.event_id}>
-                  <Plot data={data} layout={{ title: { text: `${ev.event_id} ← ${ev.segment_id.split(":").slice(1, 2).join("")} · f0=${ev.f0_hz.toFixed(2)} Hz · score ${ev.score.toFixed(2)} · coverage ${(ev.coverage * 100).toFixed(0)}% · delayed CPA ${ev.delayed_cpa_utc}` }, xaxis: { title: { text: "recording time (s)" } }, yaxis: { title: { text: "Hz" } }, height: 420, showlegend: false }} style={{ height: 420 }} />
+                  <div className="plot-title small" title={ev.segment_id}>
+                    event {ev.event_id} ← aircraft {ev.segment_id.split(":").slice(1, 2).join("")} · f0 {ev.f0_hz.toFixed(2)} Hz · score {ev.score.toFixed(2)} · coverage{" "}
+                    {(ev.coverage * 100).toFixed(0)} % · delayed closest approach {ev.delayed_cpa_utc}
+                  </div>
+                  <Plot data={data} layout={{ xaxis: { title: { text: "recording time (s)" } }, yaxis: { title: { text: "Hz" } }, height: 420, showlegend: false, margin: { l: 60, r: 20, t: 10, b: 50 } }} />
                 </div>
               );
             })}

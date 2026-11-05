@@ -13,11 +13,12 @@ export interface PlotProps {
   data: Partial<Plotly.PlotData>[];
   layout: Partial<Plotly.Layout>;
   onClick?: (x: number, y: number) => void;
+  config?: Partial<Plotly.Config>;
   className?: string;
   style?: React.CSSProperties;
 }
 
-export function Plot({ data, layout, onClick, className, style }: PlotProps) {
+export function Plot({ data, layout, onClick, config, className, style }: PlotProps) {
   const ref = useRef<HTMLDivElement>(null);
   const clickRef = useRef(onClick);
   clickRef.current = onClick;
@@ -27,12 +28,16 @@ export function Plot({ data, layout, onClick, className, style }: PlotProps) {
     let cancelled = false;
     loadPlotly().then((Plotly) => {
       if (cancelled || !ref.current) return;
-      Plotly.react(el, data, { paper_bgcolor: "#171d24", plot_bgcolor: "#0b0f14", font: { color: "#e6edf3", size: 12 }, margin: { l: 60, r: 20, t: 40, b: 50 }, ...layout, xaxis: { automargin: true, ...layout.xaxis }, yaxis: { automargin: true, ...layout.yaxis } }, { responsive: true, displaylogo: false });
+      Plotly.react(el, data, { paper_bgcolor: "#171d24", plot_bgcolor: "#0b0f14", font: { color: "#e6edf3", size: 12 }, margin: { l: 60, r: 20, t: 40, b: 50 }, ...layout, xaxis: { automargin: true, ...layout.xaxis }, yaxis: { automargin: true, ...layout.yaxis } }, { responsive: true, displaylogo: false, ...config });
       const handler = (ev: Plotly.PlotMouseEvent) => {
         const p = ev.points?.[0];
         if (p && clickRef.current) clickRef.current(Number(p.x), Number(p.y));
       };
-      (el as unknown as { on: (e: string, h: (ev: Plotly.PlotMouseEvent) => void) => void }).on("plotly_click", handler);
+      // Plotly.react keeps the graph div's listeners: drop the previous click handler so a
+      // click is handled once (otherwise every re-render added another, duplicating points)
+      const gd = el as unknown as { on: (e: string, h: (ev: Plotly.PlotMouseEvent) => void) => void; removeAllListeners?: (e: string) => void };
+      gd.removeAllListeners?.("plotly_click");
+      gd.on("plotly_click", handler);
     });
     return () => {
       cancelled = true;

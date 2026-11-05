@@ -514,6 +514,114 @@ grade low, five alternatives listed with the true pair 0.05 z behind. The 2026-1
 in §M7 above replaces that table (its gate details predate the printed offset band, behaviour
 identical).
 
+### Overhaul 2026-11-05 — reliability, memory, usability, evidence (observed)
+
+Driven by manual testing on real recordings (a 7,484 s file rejected, a WSL freeze during a
+large-area import, 17 stale "running" jobs blocking searches, a flat 329.5 Hz ridge searched as
+aircraft evidence, an unreadable map, a null "not estimable" on a 6,380 s clip). What changed and
+what was measured; the persistent job *queue* (one scheduler for every job type) is the next
+task and is not part of this section.
+
+**Import memory (P0).** The old importer fed `multiprocessing.Pool.imap_unordered` from the tar
+stream with no backpressure (the pool's feeder thread reads the whole archive into its task
+queue), started `cpu_count − 1` spawned parsers, and kept every parsed frame for one final
+`pl.concat`. Now: at most `2 × workers` batches in flight, parsers write Parquet parts straight to
+a staging directory, segmentation runs per aircraft bucket of ≤ 3 M samples, the worker count is
+derived from a memory budget (default: half of available memory, cgroup/WSL-aware, max 4 GB),
+the process tree is watched after every batch (throttle above the budget, stop above 1.5×), and
+the dataset is written into `<id>.partial/` and renamed only when complete. Measured with
+`scripts/profile_import.py` (whole process tree sampled every 0.5 s, kill ceiling 20 GB) on the
+2026-11-03 ADSB.lol day (3.53 GB, 68,672 trace files), 16-CPU / 42 GB WSL2 machine, offline:
+
+| region | before (`2313baf`) | after |
+|---|---|---|
+| Manhattan (−74.15,40.65,−73.85,40.90) | 61 s, peak 4.39 GB, 15 parsers | 61.5 s, peak 3.50 GB, 9 parsers (default budget) |
+| CONUS (−125,24,−66,50) | killed by the 20 GB ceiling after 102 s (21.9 GB and rising) | completed in 389 s, peak 4.62 GB, 11 parsers; 53.7 M samples, 685,631 segments, 1.46 GB Parquet |
+
+The CONUS run used the first per-parser estimate (300 MB) and overshot its 4.1 GB budget by
+13 % (throttled, not stopped); the estimate was then raised to 380 MB and the Manhattan re-run
+stayed under budget. Output equality: sample and filter counts identical to the old importer;
+the segment count differed by 4 of 43,943 because duplicate timestamps were resolved by arrival
+order (non-deterministic in both versions) — segmentation now sorts on a full key.
+
+**Archive handling.** Release lookups distinguish future day, not yet published (days appeared
+≈ 3.5 h after the UTC day ended: 2026-11-03 at 03:27 UTC on 11-04, 2026-11-04 at 03:28 UTC on
+11-05), before the archive (no ADSB.lol repository before 2023; first release 2023-02-16), not
+found, rate limited, network/outage, offline without cache, corrupt download, insufficient disk;
+no other day is ever substituted. Parts are verified against GitHub's published SHA-256 digests
+(cached per size+mtime), a failing part is kept as `.corrupt` and fetched again, downloads resume
+from `.part`, free disk is checked first.
+
+**Jobs.** Imports are persistent jobs (`imports` table, detached worker process, heartbeat, PID +
+creation time, stage/byte/file progress, cancel, retry, log); a duplicate request returns the
+running job; one import at a time; stale rows from dead workers become `interrupted` (never
+deleted) at API start-up and before every admission; searches use the same status and a PSS-based
+memory budget with a budget-derived worker count. Global `/api/jobs` and a Jobs page. Codex's
+search-side fixes (process identity, atomic admission) were kept.
+
+**Long recordings.** Files over the 2 h analysis limit are no longer rejected: the first 2 h are
+analysed and labelled, further segments are created from the preserved original (hard link) with
+FFmpeg input seeking, and each recording records its offset in the source; UTC is shifted by the
+offset. A chirp test checks that a 20–25 s segment of an MP3 decodes at the right time.
+
+**Time metadata.** Recordings record their time basis (verified start, date only, date range,
+upper bound only — e.g. a video publication date — or unknown); an uncertainty without a start,
+a start without a timezone or without an uncertainty, and inconsistent dates are refused.
+
+**Evidence labels.** Every event is measured (descent around the steepest point, excursion,
+plateaus, monotonicity) and labelled plausible aircraft Doppler / weak Doppler evidence / tonal
+ridge only. Controls on the events already in the local database: real Livermore phone
+recordings 221 plausible, 8 weak, 0 tonal-only; hand-traced true passes (simulated over real
+tracks) 66/66 plausible; automatic detections in dense simulated traffic 629 / 457 / 212; the
+Central Park 13–62 s ridge: tonal-only (0.44 % change). A second finding: the straight-pass
+template detector re-measures points inside a ±4 Hz band that follows its own template, so at
+noise level its "measured" ridge is the template — a flat 329.5 Hz test tone produced a
+"plausible" 364→327 Hz event. Template events now store per-point levels and are judged only
+from points at z ≥ 3; on three synthetic scenarios (0/4/10 dB) all 6 true passes stay plausible
+and 2 of 3 spurious template events become tonal-only. Searches refuse tonal-only events unless
+the operator reviewed and accepted them; a new `event_evidence` gate keeps such results at low
+(weak evidence caps at medium). Detection reports what it scanned (always the whole recording),
+every rejected candidate with its reason, and next steps.
+
+**Gates and search integrity.** (1) The chance-match null sampled offsets uniformly over the
+whole recording, but scoring only looks at each event's own window, so admissible shifts form
+bands of a few tens of seconds (24–59 s for the Central Park event); on a 6,380 s clip ≈ 0.5 %
+of draws landed there and none scored validly — "0 valid samples, clip too short" was the wrong
+diagnosis. Offsets are now drawn from the admissible set (≥ 1 s apart) and the gate reports the
+band and the real reason when it is still not estimable. (2) `clock_lock` no longer passes on a
+single event (it trivially agrees with its own fitted clock): single-event results can reach
+medium, never high. (3) `search_complete` missed two of the three hard caps (segment cap "exceed
+cap", Mode B assignment cap) because it string-matched "exceed the cap"; all caps now mark the
+search as not exhaustive. (4) A grid over the point cap raised a raw ValueError; it is now an
+explicit input error. (5) Searches never run silently over every imported archive: datasets are
+resolved to the recording's day and kind (real/SYNTHETIC); mixing or other days need an explicit
+development override; an area outside the data is refused. **Before/after benchmark numbers for
+(1)–(3) and the evidence gate are pending** (synthetic and Livermore re-runs started after this
+commit); until then the 2026-11-04 tables above describe the previous gate version.
+
+**UI.** Guided Import page (readiness checklist, time-basis choice with live UTC conversion,
+segment controls, live import progress that survives reloads), Jobs page, Spectrogram lab
+(halo-outlined colour-blind-safe ridges 3–4 px, start/steepest/end markers, whole-recording
+overview strip, zoom to event or rejected candidate, frequency presets, colormaps, keyboard pan/
+zoom, evidence labels and review, detection diagnostics), Search page (modes enabled by the
+recording's time basis, evidence per event, explicit dataset selection, presets, advanced
+settings with units and help, checklist that disables Run, dry-run workload estimate), Results
+(verdict first: "LOW — the coordinates below are NOT a verified location", failed checks in
+plain words, time assumption and bounded-search scope, map with only the hypotheses' tracks by
+default, layer toggles, labelled lat/lon grid without a basemap, zoom from table). Fixed: the
+spectrogram axis title overlapped the controls; Plotly and MapLibre click handlers accumulated on
+every redraw (duplicated drawn points). The consent checkboxes/`--authorized` gate were removed
+at the owner's request (fields still accepted, not enforced).
+
+**Not done from the overhaul brief (stated plainly).** Blind search without a geographic prior
+(P3) and its held-out evaluation harness are not implemented; the bbox is still required.
+Score/margin calibration on independent real recordings, hard-negative sound sets (speech,
+music, wind, MP3 artefacts) and an anytime budget-aware replacement for the hard candidate caps
+are not done (the caps are now at least reported as incomplete search). Historical recordings
+before 2023 get a clear "no archive" message; no non-ADS-B path exists. The UI has no automated
+contrast/snapshot tests yet (verified by headless-browser screenshots only). Events detected
+before this version have no per-point levels, so old template events keep the lenient label.
+
 ### Final test summary (observed, final code)
 
 ```
