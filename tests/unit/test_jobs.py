@@ -270,3 +270,16 @@ def test_job_view_hides_worker_token_and_traceback(tmp_path):
     v = job_view(q.get(j.id))
     assert "worker_token" not in json.dumps(v) and "Traceback" not in json.dumps(v)
     assert "Traceback" in json.dumps(job_view(q.get(j.id), debug=True))
+
+
+def test_inline_progress_never_reaches_stdout(tmp_path, capsys):
+    """Regression (release smoke test): CLI stdout is machine-readable JSON (demo, search), so
+    inline-job progress must go to stderr."""
+    from aerodoppler.jobs.service import run_inline
+
+    s = Settings(data_dir=tmp_path, offline=True)
+    s.ensure_dirs()
+    job, _ = run_inline(s, "diagnostic", {"seconds": 0.3})
+    out = capsys.readouterr()
+    assert job.status == "succeeded"
+    assert out.out == "" and job.id in out.err

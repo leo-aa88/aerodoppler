@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -85,7 +86,7 @@ def run_inline(
     params: dict[str, Any],
     *,
     fn: Callable[[JobContext], Any] | None = None,
-    log: Callable[[str], None] = print,
+    log: Callable[[str], None] | None = None,
     wait_s: float = 24 * 3600.0,
 ) -> tuple[Job, Any]:
     """Run a job in this process with full lifecycle guarantees. ``fn`` replaces the type's
@@ -93,6 +94,11 @@ def run_inline(
     value is passed back and its dict form (if any) stored as the result."""
     from aerodoppler.jobs.scheduler import capacity_for
     from aerodoppler.jobs.worker import CURRENT_JOB, Supervisor
+
+    if log is None:
+        # progress goes to stderr: stdout of CLI commands (demo, search, …) is machine-readable
+        def log(m: str) -> None:
+            print(m, file=sys.stderr, flush=True)
 
     queue = queue_for(settings)
     parent = CURRENT_JOB.get()
