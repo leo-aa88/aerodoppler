@@ -423,6 +423,10 @@ class SqliteJobQueue:
                 cls, mem = row["resource_class"], float(row["memory_mb"])
                 if per_class.get(cls, 0) >= capacity.class_limits.get(cls, 1):
                     continue
+                if mem > capacity.memory_budget_mb:
+                    # can never fit: must not hold a head-of-line reservation (it would block
+                    # every younger job forever); the scheduler fails it with the reason
+                    continue
                 if used_mem + reserved + mem > capacity.memory_budget_mb:
                     reserved += mem  # head-of-line reservation
                     continue

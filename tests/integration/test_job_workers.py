@@ -64,7 +64,10 @@ def test_concurrency_limit_holds_under_load(tmp_path):
         while time.time() < deadline:
             live = q.list(statuses=["claimed", "running"])
             peak_db = max(peak_db, len(live))
-            peak_proc = max(peak_proc, len(_worker_pids(ids)))
+            active = [j.id for j in q.list(statuses=["claimed", "running"])]
+            # a worker counts while its job is active (one that has written its final state
+            # and is exiting no longer runs work)
+            peak_proc = max(peak_proc, len(_worker_pids(active)) if active else 0)
             if all(q.get(i).status in TERMINAL for i in ids):
                 break
             time.sleep(0.05)
