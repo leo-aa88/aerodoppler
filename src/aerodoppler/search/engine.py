@@ -10,6 +10,7 @@ import logging
 import multiprocessing as mp
 import os
 import re
+import signal
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -258,6 +259,15 @@ def _score_point(
             )
         res.per_event = per_event
     return res
+
+
+def _pool_worker_init() -> None:
+    """Scoring workers die on SIGTERM. A Python SIGTERM handler inherited through fork runs
+    only in a process's main thread, but numba starts threads in the worker: when the signal
+    lands on one of those, the main thread stays blocked on the pool's task-queue lock and
+    ``Pool.terminate()`` waits for it forever (observed: a benchmark hung 28 min after its
+    fine scoring)."""
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
 
 def _worker_score(args: tuple[int, int]) -> tuple[int, LockedResult]:
@@ -841,7 +851,7 @@ class SearchEngine:
 
         if n_workers > 1 and len(tasks) > 16 and hasattr(os, "fork"):
             ctx_mp = mp.get_context("fork")
-            with ctx_mp.Pool(n_workers) as pool:
+            with ctx_mp.Pool(n_workers, initializer=_pool_worker_init) as pool:
                 for i, r in pool.imap_unordered(
                     _worker_score, tasks, chunksize=max(1, min(64, len(tasks) // (n_workers * 4)))
                 ):
@@ -849,6 +859,9 @@ class SearchEngine:
                     done += 1
                     if done % every == 0:
                         self._stage(label, done=done, total=len(tasks))
+                # normal end: let the workers exit on the sentinel instead of signalling them
+                pool.close()
+                pool.join()
         else:
             for t in tasks:
                 i, r = _worker_score(t)
