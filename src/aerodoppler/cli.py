@@ -576,7 +576,9 @@ def _summarize_result(res) -> str:
                 "coverage": [round(x, 2) for x in c.score_components.coverage],
                 "silence_penalty": round(c.score_components.silence_penalty, 3),
                 "inferred_start_utc": c.inferred_start_utc,
-                "f0_hz": [round(f, 2) for f in c.source_fundamental_hz_per_event],
+                "f0_hz": [
+                    None if f is None else round(f, 2) for f in c.source_fundamental_hz_per_event
+                ],
                 "flights": c.extra.get("segments"),
                 "ground_elevation_m": c.ground_elevation_m,
                 "grid_m": c.nominal_grid_spacing_m,

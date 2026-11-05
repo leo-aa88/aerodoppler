@@ -301,7 +301,7 @@ function Results() {
                     ))}
                   </td>
                   <td className="small">{c.inferred_start_utc}</td>
-                  <td className="small">{c.source_fundamental_hz_per_event.map((f) => f.toFixed(2)).join(" / ")}</td>
+                  <td className="small">{c.source_fundamental_hz_per_event.map((f) => (f == null ? "–" : f.toFixed(2))).join(" / ")}</td>
                   <td className="small">{c.nominal_grid_spacing_m} m</td>
                   <td className="small">{c.estimated_uncertainty_m !== null ? `${c.estimated_uncertainty_m.toFixed(0)} m` : "–"}</td>
                 </tr>
