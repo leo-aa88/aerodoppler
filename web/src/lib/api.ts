@@ -301,7 +301,7 @@ export interface Candidate {
   flight_segment_ids: string[];
   inferred_start_utc: string;
   global_time_shift_s: number;
-  source_fundamental_hz_per_event: number[];
+  source_fundamental_hz_per_event: (number | null)[];
   score_total: number;
   score_components: ScoreComponents;
   flags: string[];
