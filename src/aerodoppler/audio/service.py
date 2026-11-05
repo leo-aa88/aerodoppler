@@ -3,7 +3,9 @@ event proposals, manual events, purge (SPEC §8, §11)."""
 
 from __future__ import annotations
 
+import datetime as dt
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,11 @@ class NotFound(KeyError):
     pass
 
 
+def _shift_iso(iso: str, seconds: float) -> str:
+    t = dt.datetime.fromisoformat(iso.replace("Z", "+00:00")) + dt.timedelta(seconds=seconds)
+    return t.astimezone(dt.UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def ingest_recording(
     store: Store,
     settings: Settings,
@@ -39,16 +46,41 @@ def ingest_recording(
     synthetic: bool = False,
     notes: str | None = None,
     keep_original: bool = True,
+    segment_start_s: float = 0.0,
+    segment_duration_s: float | None = None,
+    parent_recording_id: str | None = None,
+    original_filename: str | None = None,
+    date_earliest_utc: str | None = None,
+    date_latest_utc: str | None = None,
 ) -> Recording:
+    """Ingest one interval of an audio/video file (the whole file when it fits).
+
+    ``start_time_utc`` is the UTC time of the first sample of the SOURCE file; the
+    recording's own ``start_time_utc`` is shifted by ``segment_start_s`` so every event time
+    maps to the right UTC instant. Files longer than ``max_audio_duration_s`` are not
+    rejected: the first ``max_audio_duration_s`` (or the requested segment) are analysed and
+    the result says so (``truncated``); the original is kept so other segments can be made."""
     size_mb = Path(path).stat().st_size / 1e6
     if size_mb > settings.max_upload_mb:
         raise AudioDecodeError(f"file is {size_mb:.0f} MB; limit is {settings.max_upload_mb} MB")
-    dec = decode_audio(Path(path), max_duration_s=settings.max_audio_duration_s)
+    dec = decode_audio(
+        Path(path),
+        max_duration_s=settings.max_audio_duration_s,
+        start_s=segment_start_s,
+        duration_s=segment_duration_s,
+    )
+    if original_filename:
+        dec.original_filename = original_filename
     rec_id = new_id("rec")
     rec_dir = settings.recordings_dir / rec_id
     rec_dir.mkdir(parents=True, exist_ok=True)
+    original_path = None
     if keep_original:
-        shutil.copy2(path, rec_dir / ("original_" + safe_filename(dec.original_filename)))
+        original_path = rec_dir / ("original_" + safe_filename(dec.original_filename))
+        try:
+            os.link(path, original_path)  # another segment of the same source: no copy
+        except OSError:
+            shutil.copy2(path, original_path)
     mono = to_analysis_mono(dec, settings.analysis_sample_rate_hz)
     write_wav(
         rec_dir / "analysis_2khz.wav",
@@ -56,6 +88,19 @@ def ingest_recording(
         settings.analysis_sample_rate_hz,
         subtype="FLOAT",
     )
+    seg0 = float(dec.segment_start_s)
+    rec_start = _shift_iso(start_time_utc, seg0) if start_time_utc else None
+    rec_date = recording_date_utc or (rec_start[:10] if rec_start else None)
+    if rec_start:
+        basis = "verified_start"
+    elif rec_date:
+        basis = "date_only"
+    elif date_earliest_utc and date_latest_utc:
+        basis = "date_range"
+    elif date_latest_utc:
+        basis = "upper_bound_only"
+    else:
+        basis = "unknown"
     rec = Recording(
         id=rec_id,
         sha256=dec.sha256,
@@ -65,9 +110,15 @@ def ingest_recording(
         channels=dec.channels,
         source_duration_s=dec.source_duration_s,
         truncated=dec.truncated,
-        start_time_utc=start_time_utc,
+        segment_start_s=seg0,
+        parent_recording_id=parent_recording_id,
+        source_start_time_utc=start_time_utc,
+        start_time_utc=rec_start,
         start_time_uncertainty_s=start_time_uncertainty_s,
-        recording_date_utc=recording_date_utc or (start_time_utc[:10] if start_time_utc else None),
+        recording_date_utc=rec_date,
+        time_basis=basis,
+        date_earliest_utc=date_earliest_utc,
+        date_latest_utc=date_latest_utc,
         owner_permission_confirmed=True,
         synthetic=synthetic,
         notes=notes,
@@ -79,14 +130,62 @@ def ingest_recording(
                 "decoder": dec.decoder,
                 "analysis_rate_hz": settings.analysis_sample_rate_hz,
                 "original_kept": keep_original,
+                "original_path": str(original_path) if original_path else None,
+                "source_sha256": dec.sha256,
                 "source_duration_s": dec.source_duration_s,
+                "segment_start_s": seg0,
+                "segment_end_s": seg0 + dec.duration_s,
                 "truncated": dec.truncated,
+                "parent_recording_id": parent_recording_id,
             },
             indent=2,
         )
     )
     store.add_recording(rec, rec_dir)
     return rec
+
+
+def segment_notice(rec: Recording) -> str | None:
+    """Human description of what part of the source was analysed, or None for whole files."""
+    if not rec.truncated and rec.segment_start_s == 0:
+        return None
+    a, b = rec.segment_start_s, rec.segment_start_s + rec.duration_s
+    total = f" of {rec.source_duration_s:.0f} s" if rec.source_duration_s else ""
+    return (
+        f"only {a:.0f}–{b:.0f} s{total} of the source file is analysed "
+        f"(limit {rec.duration_s / 60:.0f} min per analysis copy). Event times are relative to "
+        f"{a:.0f} s into the file; create another segment to analyse the rest."
+    )
+
+
+def create_segment(
+    store: Store, settings: Settings, rec_id: str, start_s: float, duration_s: float | None
+) -> Recording:
+    """New recording for another interval of the same preserved source file."""
+    parent = store.get_recording(rec_id)
+    d = store.recording_dir(rec_id)
+    if parent is None or d is None:
+        raise NotFound(rec_id)
+    originals = sorted(d.glob("original_*"))
+    if not originals:
+        raise AudioDecodeError("the original file of this recording was not kept")
+    root_id = parent.parent_recording_id or parent.id
+    return ingest_recording(
+        store,
+        settings,
+        originals[0],
+        recording_date_utc=parent.recording_date_utc if not parent.source_start_time_utc else None,
+        start_time_utc=parent.source_start_time_utc,
+        start_time_uncertainty_s=parent.start_time_uncertainty_s,
+        synthetic=parent.synthetic,
+        notes=parent.notes,
+        segment_start_s=start_s,
+        segment_duration_s=duration_s,
+        parent_recording_id=root_id,
+        original_filename=parent.original_filename,
+        date_earliest_utc=parent.date_earliest_utc,
+        date_latest_utc=parent.date_latest_utc,
+    )
 
 
 def analysis_audio(store: Store, rec_id: str) -> tuple[np.ndarray, int]:
@@ -130,15 +229,23 @@ def propose_events(
     cfg: DetectorConfig | None = None,
     save: bool = True,
     template: bool = True,
+    diagnostics: dict | None = None,
 ) -> list[DopplerEvent]:
     """Automatic proposals from two detectors: the Viterbi ridge tracker (precise ridges,
     harmonic families) and the straight-pass template fit (weak but long sweeps). Template
-    events are added only where no tracked event overlaps them substantially."""
-    from aerodoppler.audio.template_detect import detect_flyovers, flyovers_to_events
+    events are added only where no tracked event overlaps them substantially.
 
+    When ``diagnostics`` is a dict it is filled with what was scanned, the parameters, every
+    rejected candidate with its reason, and suggested next steps."""
+    from aerodoppler.audio.template_detect import detect_flyovers, flyovers_to_events
+    from aerodoppler.search.events import assess_event
+
+    cfg = cfg or DetectorConfig()
     spec = ensure_spectrogram(store, settings, rec_id)
-    ridges = detect_ridges(spec, cfg)
+    rejected: list[dict] = []
+    ridges = detect_ridges(spec, cfg, rejected=rejected)
     events = ridges_to_events(ridges, spec, rec_id)
+    n_tracked = len(events)
     if template:
         for te in flyovers_to_events(spec, detect_flyovers(spec), rec_id):
             overlap = any(
@@ -150,7 +257,89 @@ def propose_events(
                 events.append(te)
     if save:
         events = [store.add_event(e) for e in events]
+    if diagnostics is not None:
+        diagnostics.update(
+            detection_diagnostics(spec, cfg, events, n_tracked, rejected, assess_event)
+        )
     return events
+
+
+_REJECT_TEXT = {
+    "too_short": "shorter than the minimum duration",
+    "weak": "too faint (mean whitened level below the minimum)",
+    "stationary_tone": "frequency almost constant (hum, machinery, a held note — or a plateau)",
+}
+
+
+def detection_diagnostics(
+    spec: Spectrogram,
+    cfg: DetectorConfig,
+    events: list[DopplerEvent],
+    n_tracked: int,
+    rejected: list[dict],
+    assess: Any,
+) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    for r in rejected:
+        for reason in r["reasons"]:
+            counts[reason] = counts.get(reason, 0) + 1
+    labels: dict[str, int] = {}
+    for e in events:
+        lab = assess(e)["label"]
+        labels[lab] = labels.get(lab, 0) + 1
+    suggestions: list[str] = []
+    if not events:
+        suggestions.append(
+            "No tonal ridge passed the detector. That does not prove no aircraft is audible: "
+            "check the rejected candidates below, look at the spectrogram yourself, and draw "
+            "a ridge manually if you see a slanted line."
+        )
+    if counts.get("too_short"):
+        suggestions.append(
+            f"{counts['too_short']} candidate(s) were shorter than {cfg.min_duration_s:.0f} s; "
+            "lower 'min duration' if passes in this recording are short."
+        )
+    if counts.get("weak"):
+        suggestions.append(
+            f"{counts['weak']} candidate(s) were too faint; lower the threshold (z) to see them, "
+            "at the cost of more noise proposals."
+        )
+    if counts.get("stationary_tone"):
+        suggestions.append(
+            f"{counts['stationary_tone']} candidate(s) were rejected as nearly constant tones "
+            "(no Doppler change); these are usually hum or machinery."
+        )
+    if labels.get("tonal_only"):
+        suggestions.append(
+            f"{labels['tonal_only']} proposed event(s) show no measurable Doppler transition "
+            "(labelled 'tonal ridge only'); they cannot locate the recording unless you review "
+            "them and are sure they are aircraft."
+        )
+    rejected_sorted = sorted(rejected, key=lambda r: -r["mean_z"])[:60]
+    for r in rejected_sorted:
+        r["reason_text"] = "; ".join(_REJECT_TEXT.get(x, x) for x in r["reasons"])
+    return {
+        "scanned": {
+            "t_start_s": float(spec.times[0]),
+            "t_end_s": float(spec.times[-1]),
+            "f_min_hz": cfg.min_frequency_hz,
+            "f_max_hz": min(cfg.max_frequency_hz, float(spec.freqs[-1])),
+            "note": "the detector always scans the whole recording; the view range does not limit it",
+        },
+        "parameters": {
+            "threshold_z": cfg.threshold_z,
+            "min_duration_s": cfg.min_duration_s,
+            "min_mean_z": cfg.min_mean_z,
+            "min_freq_variation_hz": cfg.min_freq_variation_hz,
+        },
+        "proposals": len(events),
+        "from_ridge_tracker": n_tracked,
+        "from_template_fit": len(events) - n_tracked,
+        "evidence_labels": labels,
+        "rejected_counts": counts,
+        "rejected": rejected_sorted,
+        "suggestions": suggestions,
+    }
 
 
 def add_manual_event(
@@ -338,3 +527,72 @@ def pick_events(
             chosen.append(e)
             centres.append(c)
     return chosen
+
+
+class TimeMetadataError(ValueError):
+    def __init__(self, message: str, field: str, action: str = ""):
+        super().__init__(message)
+        self.field = field
+        self.action = action
+
+
+def check_time_metadata(
+    recording_date_utc: str | None,
+    start_time_utc: str | None,
+    start_time_uncertainty_s: float | None,
+    date_earliest_utc: str | None,
+    date_latest_utc: str | None,
+) -> None:
+    """Reject time metadata that pretends to more than it says (raises TimeMetadataError)."""
+
+    def day(v: str, field: str) -> dt.date:
+        try:
+            return dt.date.fromisoformat(v)
+        except ValueError as e:
+            raise TimeMetadataError(f"'{v}' is not a date (YYYY-MM-DD)", field) from e
+
+    if start_time_uncertainty_s is not None and not start_time_utc:
+        raise TimeMetadataError(
+            "an uncertainty only makes sense around a known start time; none was given",
+            "start_time_uncertainty_s",
+            "enter the UTC start time, or leave the uncertainty empty",
+        )
+    if start_time_utc:
+        try:
+            t = dt.datetime.fromisoformat(start_time_utc.replace("Z", "+00:00"))
+        except ValueError as e:
+            raise TimeMetadataError(
+                f"'{start_time_utc}' is not an ISO-8601 time",
+                "start_time_utc",
+                "use the form 2026-11-03T15:30:00Z",
+            ) from e
+        if t.tzinfo is None:
+            raise TimeMetadataError(
+                "the start time has no timezone; a local clock time is ambiguous",
+                "start_time_utc",
+                "add Z for UTC (e.g. 2026-11-03T15:30:00Z) or an explicit offset (+01:00)",
+            )
+        if start_time_uncertainty_s is None:
+            raise TimeMetadataError(
+                "a start time needs its uncertainty: how many seconds could it be off?",
+                "start_time_uncertainty_s",
+                "e.g. 2 for a network-synced phone, 60 for a clock read by eye",
+            )
+        if recording_date_utc and t.astimezone(dt.UTC).date() != day(
+            recording_date_utc, "recording_date_utc"
+        ):
+            raise TimeMetadataError(
+                "the UTC date and the UTC start time disagree",
+                "recording_date_utc",
+                "leave the date empty when the start time is known",
+            )
+    lo = day(date_earliest_utc, "date_earliest_utc") if date_earliest_utc else None
+    hi = day(date_latest_utc, "date_latest_utc") if date_latest_utc else None
+    if lo and hi and lo > hi:
+        raise TimeMetadataError("the earliest date is after the latest date", "date_earliest_utc")
+    if recording_date_utc:
+        d = day(recording_date_utc, "recording_date_utc")
+        if (lo and d < lo) or (hi and d > hi):
+            raise TimeMetadataError(
+                "the recording date lies outside the given date range", "recording_date_utc"
+            )

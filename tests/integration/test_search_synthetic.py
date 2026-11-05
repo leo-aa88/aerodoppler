@@ -4,8 +4,6 @@ time) → ranked candidates; plus negative cases (wrong date, no flights, no DEM
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from aerodoppler.audio.service import (
@@ -158,7 +156,15 @@ def test_wrong_date_abstains_with_reason(world):
         operator_authorized=True,
         quality_settings=QualitySettings(workers=2),
     )
-    res = run_search_inline(w["store"], w["settings"], req)
+    # a dataset whose day cannot contain the recording is refused before searching ...
+    with pytest.raises(
+        SearchInputError, match="covers 2026-09-08, but the recording can only be on 2026-09-09"
+    ):
+        run_search_inline(w["store"], w["settings"], req)
+    # ... and with the explicit development override the search abstains for lack of flights
+    res = run_search_inline(
+        w["store"], w["settings"], req.model_copy(update={"allow_date_mismatch": True})
+    )
     assert res.abstention.abstained and res.abstention.reason == "no_flight_coverage"
     assert res.candidates == []
 
@@ -187,11 +193,8 @@ def test_wrong_time_abstains(world):
     }
 
 
-def test_missing_dem_is_an_explicit_error(world, tmp_path: Path):
+def test_area_outside_flight_data_is_refused(world):
     w = world
-    s2 = Settings(data_dir=w["settings"].data_dir, offline=True)
-    s2 = s2.model_copy(update={"data_dir": w["settings"].data_dir})
-    # a bbox with no DEM tile: elsewhere in the world, offline
     req = SearchRequest(
         mode=SearchMode.UNKNOWN_TIME,
         recording_id=w["rec"].id,
@@ -199,18 +202,82 @@ def test_missing_dem_is_an_explicit_error(world, tmp_path: Path):
         date_utc=w["spec"].date_utc,
         bbox=BBox(west=10.0, south=50.0, east=10.3, north=50.3),
         flight_dataset_ids=[w["sc"].dataset.dataset_id],
-        operator_authorized=True,
         quality_settings=QualitySettings(workers=2),
     )
-    with pytest.raises(SearchInputError, match="DEM unavailable"):
-        run_search_inline(w["store"], s2, req)
-    # explicit flat-ground fallback is accepted (and flagged) — but has no flights there
-    req2 = req.model_copy(
-        update={
-            "quality_settings": QualitySettings(
-                workers=2, ground_elevation_m=200.0, ground_elevation_sigma_m=50.0
-            )
-        }
+    with pytest.raises(SearchInputError, match="outside every selected flight dataset"):
+        run_search_inline(w["store"], w["settings"], req)
+
+
+def test_missing_dem_is_an_explicit_error(world):
+    import shutil
+
+    w = world
+    dem_dir = w["settings"].dem_dir
+    hidden = dem_dir.with_name("dem_hidden_for_test")
+    req = SearchRequest(
+        mode=SearchMode.UNKNOWN_TIME,
+        recording_id=w["rec"].id,
+        event_ids=[w["events"][0].id, w["events"][1].id],
+        date_utc=w["spec"].date_utc,
+        bbox=w["spec"].bbox,
+        flight_dataset_ids=[w["sc"].dataset.dataset_id],
+        quality_settings=QualitySettings(workers=2),
     )
-    res = run_search_inline(w["store"], s2, req2)
-    assert res.abstention.abstained and any("flat ground" in wmsg for wmsg in res.warnings)
+    shutil.move(dem_dir, hidden)
+    dem_dir.mkdir()
+    try:
+        with pytest.raises(SearchInputError, match="DEM unavailable"):
+            run_search_inline(w["store"], w["settings"], req)
+        # an explicit flat-ground value is accepted, and flagged in the result
+        req2 = req.model_copy(
+            update={
+                "quality_settings": QualitySettings(
+                    workers=4, ground_elevation_m=200.0, ground_elevation_sigma_m=50.0
+                )
+            }
+        )
+        res = run_search_inline(w["store"], w["settings"], req2)
+        assert any("flat ground" in wmsg for wmsg in res.warnings)
+    finally:
+        shutil.rmtree(dem_dir)
+        shutil.move(hidden, dem_dir)
+
+
+def test_search_over_memory_budget_stops_cleanly(world, monkeypatch):
+    """A search that exceeds its memory budget fails visibly instead of exhausting RAM."""
+    import aerodoppler.resources as res
+    from aerodoppler.jobs.runner import SearchResourceExceeded
+
+    w = world
+    monkeypatch.setattr(res, "tree_pss_mb", lambda pid=None: 1e9)
+    req = SearchRequest(
+        mode=SearchMode.UNKNOWN_TIME,
+        recording_id=w["rec"].id,
+        event_ids=[e.id for e in w["events"][:2]],
+        date_utc=w["spec"].date_utc,
+        bbox=w["spec"].bbox,
+        flight_dataset_ids=[w["sc"].dataset.dataset_id],
+        quality_settings=QualitySettings(workers=1),
+    )
+    with pytest.raises(SearchResourceExceeded):
+        run_search_inline(w["store"], w["settings"], req)
+    job = w["store"].list_searches()[0]
+    assert job["status"] == "failed" and job["stage"] == "memory_budget"
+    assert "budget" in job["error"]
+
+
+def test_search_without_datasets_uses_only_date_compatible_ones(world):
+    """No dataset list: the engine resolves date-compatible data of the same kind instead of
+    every imported archive; a wrong date is refused with the reason."""
+    w = world
+    req = SearchRequest(
+        mode=SearchMode.UNKNOWN_TIME,
+        recording_id=w["rec"].id,
+        event_ids=[e.id for e in w["events"][:2]],
+        date_utc="2020-01-01",
+        bbox=w["spec"].bbox,
+    )
+    with pytest.raises(
+        SearchInputError, match="no imported SYNTHETIC flight archive covers 2020-01-01"
+    ):
+        run_search_inline(w["store"], w["settings"], req)

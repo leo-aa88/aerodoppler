@@ -8,11 +8,13 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from aerodoppler import __version__
+from aerodoppler.api.errors import scrub, validation_handler
 from aerodoppler.api.routes import router
 from aerodoppler.config import Settings, get_settings
 from aerodoppler.jobs.store import Store
@@ -43,7 +45,16 @@ def create_app(settings: Settings | None = None, web_dir: Path | None = None) ->
     )
     app.state.settings = settings
     app.state.store = Store(settings.db_path)
+    # reconcile jobs whose workers died with the previous server/machine before anything
+    # reads job state (dead PIDs never hold slots; rows are kept as "interrupted")
+    from aerodoppler.jobs.imports import reconcile_stale_imports
+    from aerodoppler.jobs.runner import reconcile_stale_jobs
+
+    lost = reconcile_stale_jobs(app.state.store) + reconcile_stale_imports(app.state.store)
+    if lost:
+        log.warning("marked %d jobs interrupted (their workers are gone): %s", len(lost), lost)
     app.include_router(router)
+    app.add_exception_handler(RequestValidationError, validation_handler)  # type: ignore[arg-type]
     # The Next.js dev server (`make web-dev`) runs on a different origin from the API; allow
     # browser calls from localhost on any port and nothing else. The built UI is same-origin.
     app.add_middleware(
@@ -64,7 +75,16 @@ def create_app(settings: Settings | None = None, web_dir: Path | None = None) ->
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception):
         log.exception("unhandled error on %s", request.url.path)
-        return JSONResponse(status_code=500, content={"detail": f"{type(exc).__name__}: {exc}"})
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": {
+                    "code": "internal_error",
+                    "message": scrub(f"{type(exc).__name__}: {exc}"),
+                    "action": "see the server log for details",
+                }
+            },
+        )
 
     web = web_dir if web_dir is not None else resolve_web_dir()
     if web is not None and (web / "index.html").exists():

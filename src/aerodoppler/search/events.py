@@ -178,3 +178,108 @@ def measure_event(
         n_points=n,
         flags=flags,
     )
+
+
+# ---- evidence assessment ----------------------------------------------------------------------
+
+# A propeller aircraft at 40-70 m/s produces a full Doppler swing f_app/f_rec of 1.26-1.50.
+# A ridge window that contains the transition shows several percent of change; a window on one
+# plateau (or a stationary source: hum, machinery, a held musical note) shows almost none.
+# Thresholds are evidence grades, not a classifier of the sound's origin.
+DOPPLER_MIN_EXCURSION = 0.03  # relative change needed to count as a visible transition
+WEAK_MIN_EXCURSION = 0.01
+# whitened level above which a template-fit point is a measurement rather than the band maximum
+# of noise (the maximum of ~30 noise bins is z ~ 2)
+TEMPLATE_POINT_MIN_Z = 3.0
+
+
+def assess_event(ev: DopplerEvent, c_mps: float = 343.0) -> dict:
+    """Shape metrics and an evidence label for one event.
+
+    Labels: ``plausible_doppler`` (a descending transition of several percent),
+    ``weak_doppler`` (some descent but small or with unreached plateaus), ``tonal_only`` (a
+    tonal ridge without a measurable Doppler transition — it may be a stationary source, or a
+    real aircraft heard only on a plateau; either way it does not constrain a location).
+    A user review (``ev.extra['review']``) is reported but never changes the measured label."""
+    review = (ev.extra or {}).get("review")
+    pz = (ev.extra or {}).get("point_z")
+    if ev.detection_method == "template-fit" and pz and len(pz) == len(ev.ridge_points):
+        # a template event's points are the strongest peak inside a band that follows the
+        # fitted template; at noise level that peak traces the template itself. Judge the
+        # shape only from points clearly above noise.
+        strong = [p for p, z in zip(ev.ridge_points, pz, strict=True) if z >= TEMPLATE_POINT_MIN_Z]
+        if len(strong) < max(10, int(0.4 * len(pz))):
+            return {
+                "label": "tonal_only",
+                "reasons": [
+                    f"only {len(strong)} of {len(pz)} template-fit points stand clearly above noise "
+                    f"(z >= {TEMPLATE_POINT_MIN_Z:g}); the Doppler shape comes from the fitted "
+                    "template, not from the audio"
+                ],
+                "metrics": {"n_points": len(pz), "strong_points": len(strong)},
+                "review": review,
+            }
+        ev = ev.model_copy(update={"ridge_points": strong})
+    pts = sorted(ev.ridge_points, key=lambda p: p.relative_t_s)
+    reasons: list[str] = []
+    if len(pts) < 3:
+        return {"label": "tonal_only", "reasons": ["fewer than three ridge points"], "metrics": {}}
+    f = np.array([p.frequency_hz for p in pts], dtype=float)
+    try:
+        feat = measure_event(ev, c_mps)
+    except ValueError as e:
+        return {"label": "tonal_only", "reasons": [str(e)], "metrics": {}}
+    f_mean = float(np.mean(f))
+    t = np.array([p.relative_t_s for p in pts], dtype=float)
+    _, drop = robust_descent_centre(t, f)
+    rel_exc = (feat.f_max_hz - feat.f_min_hz) / max(f_mean, 1e-6)
+    rel_drop = max(drop, 0.0) / max(f_mean, 1e-6)
+    metrics = {
+        "duration_s": round(feat.duration_s, 1),
+        "n_points": feat.n_points,
+        "f_mean_hz": round(f_mean, 2),
+        "f_range_hz": round(float(f.max() - f.min()), 2),
+        "excursion_pct": round(100.0 * rel_exc, 2),
+        "descent_pct": round(100.0 * rel_drop, 2),
+        "max_slope_hz_per_s": round(feat.slope_max_hz_per_s, 3),
+        "max_slope_pct_per_s": round(100.0 * feat.slope_max_hz_per_s / max(f_mean, 1e-6), 4),
+        "steepest_point_s": round(feat.t_center_s, 1),
+        "plateaus_reached": "plateaus_not_reached" not in feat.flags,
+        "monotonic": "non_monotonic_ridge" not in feat.flags,
+        "harmonics_seen": len(ev.candidate_harmonic_numbers or [1]),
+        "implied_radial_speed_mps": round(feat.v_radial_mps, 1),
+        "mean_z": (ev.extra or {}).get("mean_z"),
+    }
+    if "no_descending_slope" in feat.flags:
+        reasons.append(
+            "no descending frequency transition (an aircraft passing by always descends)"
+        )
+    if rel_drop < WEAK_MIN_EXCURSION:
+        reasons.append(
+            f"frequency changes by only {100 * rel_drop:.2f} % around the steepest point "
+            f"(a passing propeller aircraft shows several %)"
+        )
+    if "plateaus_not_reached" in feat.flags:
+        reasons.append(
+            "the ridge ends before both plateaus are reached (speed and distance underdetermined)"
+        )
+    if not metrics["monotonic"]:
+        reasons.append("the frequency does not fall monotonically from approach to recession")
+    if feat.duration_s < 30.0:
+        reasons.append(f"short ({feat.duration_s:.0f} s)")
+    if rel_drop >= DOPPLER_MIN_EXCURSION and "no_descending_slope" not in feat.flags:
+        label = "plausible_doppler" if metrics["monotonic"] else "weak_doppler"
+    elif rel_drop >= WEAK_MIN_EXCURSION and "no_descending_slope" not in feat.flags:
+        label = "weak_doppler"
+    else:
+        label = "tonal_only"
+    return {"label": label, "reasons": reasons, "metrics": metrics, "review": review}
+
+
+def usable_as_evidence(assessment: dict) -> bool:
+    """True when an event may enter a search: measured Doppler evidence, or an explicit
+    user review accepting a tonal-only event (recorded in the result manifest)."""
+    if assessment.get("label") in ("plausible_doppler", "weak_doppler"):
+        return True
+    review = assessment.get("review") or {}
+    return bool(review.get("accepted"))

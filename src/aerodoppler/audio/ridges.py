@@ -135,7 +135,12 @@ def _refine_peak(W: np.ndarray, t: int, f: int) -> float:
     return 0.0
 
 
-def detect_ridges(spec: Spectrogram, cfg: DetectorConfig | None = None) -> list[Ridge]:
+def detect_ridges(
+    spec: Spectrogram, cfg: DetectorConfig | None = None, rejected: list[dict] | None = None
+) -> list[Ridge]:
+    """Viterbi ridge tracking. When ``rejected`` is a list, every tracked candidate that was
+    not accepted is appended to it with its reason (too_short, weak, stationary_tone), so a
+    'nothing found' result can be explained instead of left to guesswork."""
     cfg = cfg or DetectorConfig()
     fmask = (spec.freqs >= cfg.min_frequency_hz) & (spec.freqs <= cfg.max_frequency_hz)
     f_off = int(np.argmax(fmask))
@@ -197,6 +202,18 @@ def detect_ridges(spec: Spectrogram, cfg: DetectorConfig | None = None) -> list[
                 )
                 work[i, lo:hi] = 0.0
             if len(idx) < min_frames:
+                if rejected is not None and len(idx) >= max(4, min_frames // 8):
+                    fr_ = spec.freqs[f_off + bins]
+                    rejected.append(
+                        {
+                            "t_start_s": float(spec.times[idx[0]]),
+                            "t_end_s": float(spec.times[idx[-1]]),
+                            "f_mean_hz": float(fr_.mean()),
+                            "f_range_hz": float(fr_.max() - fr_.min()),
+                            "mean_z": float(vals.mean()),
+                            "reasons": ["too_short"],
+                        }
+                    )
                 continue
             deltas = np.array(
                 [_refine_peak(W, int(i), int(fb)) for i, fb in zip(idx, bins, strict=False)]
@@ -211,6 +228,17 @@ def detect_ridges(spec: Spectrogram, cfg: DetectorConfig | None = None) -> list[
             if fr < cfg.min_freq_variation_hz:
                 flags.append("stationary_tone")  # hum / equipment, not an aircraft
             if flags:
+                if rejected is not None:
+                    rejected.append(
+                        {
+                            "t_start_s": float(spec.times[idx[0]]),
+                            "t_end_s": float(spec.times[idx[-1]]),
+                            "f_mean_hz": float(freqs.mean()),
+                            "f_range_hz": fr,
+                            "mean_z": mean_z,
+                            "reasons": flags,
+                        }
+                    )
                 continue
             r = Ridge(idx, spec.times[idx], freqs, vals, mean_z, float(len(idx) * hop), fr, fstd)
             r.confidence = (

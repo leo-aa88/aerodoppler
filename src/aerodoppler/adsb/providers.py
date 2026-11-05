@@ -24,6 +24,7 @@ class ArchiveAsset:
     local_path: Path | None = None
     sha256: str | None = None
     retrieved_at: str | None = None
+    expected_sha256: str | None = None  # digest published by the provider, when available
 
 
 @dataclass

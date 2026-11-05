@@ -35,7 +35,8 @@ class DecodedAudio:
     decoder: str
     original_filename: str
     source_duration_s: float | None = None
-    truncated: bool = False
+    truncated: bool = False  # audio exists after the decoded interval
+    segment_start_s: float = 0.0  # offset of the decoded interval in the source file
 
 
 def ffmpeg_binary() -> str | None:
@@ -66,32 +67,60 @@ def ffprobe_duration(path: Path) -> float | None:
         return None
 
 
-def decode_audio(path: Path, max_duration_s: float | None = None) -> DecodedAudio:
+def decode_audio(
+    path: Path,
+    max_duration_s: float | None = None,
+    start_s: float = 0.0,
+    duration_s: float | None = None,
+) -> DecodedAudio:
+    """Decode ``[start_s, start_s + duration)`` of a file (whole file by default), never more
+    than ``max_duration_s``. Only the requested interval is decoded (libsndfile seeks; FFmpeg
+    uses input seeking), so analysing the last minutes of a long file is cheap.
+
+    ``truncated`` is true when audio exists after the decoded interval; together with
+    ``segment_start_s`` and ``source_duration_s`` it lets callers disclose exactly what was
+    analysed and map segment times back to source times."""
     path = Path(path)
     if not path.exists():
         raise AudioDecodeError(f"file not found: {path}")
+    if start_s < 0:
+        raise AudioDecodeError("segment start must be >= 0 s")
+    want = min(
+        duration_s if duration_s is not None else float("inf"),
+        max_duration_s if max_duration_s is not None else float("inf"),
+    )
+    if want <= 0:
+        raise AudioDecodeError("segment duration must be > 0 s")
     digest = sha256_file(path)
     ext = path.suffix.lower()
     if ext in SNDFILE_EXT:
         try:
             info = sf.info(str(path))
-            truncated = max_duration_s is not None and info.duration > max_duration_s
-            frames = int(max_duration_s * info.samplerate) if truncated else -1
-            data, sr = sf.read(str(path), frames=frames, dtype="float32", always_2d=True)
+            if start_s >= info.duration:
+                raise AudioDecodeError(
+                    f"segment start {start_s:.0f} s is beyond the end of the file ({info.duration:.0f} s)"
+                )
+            first = int(round(start_s * info.samplerate))
+            frames = -1 if want == float("inf") else int(want * info.samplerate)
+            data, sr = sf.read(
+                str(path), start=first, frames=frames, dtype="float32", always_2d=True
+            )
         except AudioDecodeError:
             raise
         except Exception as e:
             raise AudioDecodeError(f"libsndfile failed on {path.name}: {e}") from e
+        seg_dur = data.shape[0] / sr
         return DecodedAudio(
             data,
             int(sr),
             data.shape[1],
-            data.shape[0] / sr,
+            seg_dur,
             digest,
             "libsndfile",
             path.name,
             source_duration_s=info.duration,
-            truncated=truncated,
+            truncated=start_s + seg_dur < info.duration - 1.0 / sr,
+            segment_start_s=first / info.samplerate,
         )
     ff = ffmpeg_binary()
     if ff is None:
@@ -99,62 +128,52 @@ def decode_audio(path: Path, max_duration_s: float | None = None) -> DecodedAudi
             "ffmpeg not available: install ffmpeg or `pip install imageio-ffmpeg`"
         )
     dur = ffprobe_duration(path)
-    truncated = max_duration_s is not None and dur is not None and dur > max_duration_s
+    if dur is not None and start_s >= dur:
+        raise AudioDecodeError(
+            f"segment start {start_s:.0f} s is beyond the end of the file ({dur:.0f} s)"
+        )
     # Probe stream parameters first so the native sample rate/channel count are preserved.
     sr, ch = _probe_stream(path)
-    cmd = [
-        ff,
-        "-v",
-        "error",
-        "-nostdin",
-        "-i",
-        str(path),
-    ]
-    if max_duration_s is not None:
-        # This is an output duration cap, so it must follow the input path.  Putting it
-        # between ``-i`` and the path makes FFmpeg interpret ``-t`` as the input filename.
-        cmd.extend(["-t", str(max_duration_s)])
-    cmd.extend(
-        [
-            "-vn",
-            "-map",
-            "0:a:0",
-            "-ac",
-            str(ch),
-            "-ar",
-            str(sr),
-            "-f",
-            "f32le",
-            "-acodec",
-            "pcm_f32le",
-            "pipe:1",
-        ]
-    )
+    cmd = [ff, "-hide_banner", "-loglevel", "error", "-nostdin"]
+    if start_s > 0:
+        cmd += ["-ss", f"{start_s:.6f}"]  # input seeking: frames before start are not decoded
+    cmd += ["-i", str(path)]
+    if want != float("inf"):
+        # an output duration cap must follow the input path (between -i and the path FFmpeg
+        # would read "-t" as the input filename)
+        cmd += ["-t", f"{want:g}"]
+    cmd += ["-vn", "-map", "0:a:0", "-ac", str(ch), "-ar", str(sr)]
+    cmd += ["-f", "f32le", "-acodec", "pcm_f32le", "pipe:1"]
     try:
         proc = subprocess.run(cmd, capture_output=True, timeout=3600)
     except subprocess.TimeoutExpired as e:
         raise AudioDecodeError("ffmpeg timed out") from e
-    if proc.returncode != 0 or not proc.stdout:
+    if proc.returncode != 0:
         raise AudioDecodeError(
-            f"ffmpeg failed on {path.name}: {proc.stderr.decode(errors='replace')[:400]}"
+            f"ffmpeg could not decode {path.name}: {proc.stderr.decode(errors='replace')[-400:]}"
         )
     arr = np.frombuffer(proc.stdout, dtype=np.float32)
     arr = arr[: (len(arr) // ch) * ch].reshape(-1, ch)
-    if max_duration_s is not None:
-        max_frames = int(max_duration_s * sr)
-        if dur is None and arr.shape[0] >= max_frames:
-            truncated = True
-        arr = arr[:max_frames]
+    if want != float("inf"):
+        arr = arr[: int(want * sr)]
+    seg_dur = arr.shape[0] / sr if sr else 0.0
+    if arr.shape[0] == 0:
+        raise AudioDecodeError(f"{path.name}: no audio samples in the requested interval")
+    if dur is not None:
+        truncated = start_s + seg_dur < dur - 0.5
+    else:
+        truncated = want != float("inf") and seg_dur >= want - 1.0 / sr
     return DecodedAudio(
         arr.copy(),
         sr,
         ch,
-        arr.shape[0] / sr,
+        seg_dur,
         digest,
         "ffmpeg",
         path.name,
         source_duration_s=dur,
         truncated=truncated,
+        segment_start_s=start_s,
     )
 
 

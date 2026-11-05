@@ -9,6 +9,7 @@ import json
 import logging
 import multiprocessing as mp
 import os
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -19,7 +20,7 @@ import numpy as np
 import psutil
 
 from aerodoppler import __version__
-from aerodoppler.adsb.index import FlightDataset, FlightIndex, list_datasets
+from aerodoppler.adsb.index import FlightDataset, FlightIndex
 from aerodoppler.audio.spectrogram import Spectrogram
 from aerodoppler.config import Settings
 from aerodoppler.geo.coordinates import geodetic_to_ecef, haversine_m
@@ -74,6 +75,10 @@ log = logging.getLogger(__name__)
 
 class SearchCancelled(RuntimeError):
     pass
+
+
+# warnings emitted by preselection when a hard cap discarded candidates unscored
+_TRUNCATION = re.compile(r"exceeds? (the )?cap|cap \d+ reached|cap reached")
 
 
 class SearchInputError(ValueError):
@@ -380,12 +385,33 @@ class SearchEngine:
             )
             t_min, t_max = t0_known - sigma_t0 - 600.0, t0_known + rec.duration_s + sigma_t0 + 600.0
 
-        # datasets / index
-        datasets = (
-            [FlightDataset(d, self.settings.normalized_dir / d) for d in req.flight_dataset_ids]
-            if req.flight_dataset_ids
-            else list_datasets(self.settings.normalized_dir)
+        # datasets / index: explicit, date-compatible, same kind (real/SYNTHETIC) as the
+        # recording; never "every imported archive" (see search/datasets.py)
+        from aerodoppler.search.datasets import (
+            DatasetSelectionError,
+            resolve_datasets,
+            search_dates,
         )
+
+        try:
+            ds_ids, ds_warnings = resolve_datasets(
+                self.settings.normalized_dir,
+                dates=search_dates(
+                    req.date_utc,
+                    req.start_utc,
+                    rec.duration_s,
+                    float(req.start_uncertainty_s or rec.start_time_uncertainty_s or 0.0),
+                ),
+                recording_synthetic=rec.synthetic,
+                requested=req.flight_dataset_ids,
+                bbox=req.bbox,
+                allow_date_mismatch=req.allow_date_mismatch,
+                allow_synthetic_mix=req.allow_synthetic_mix,
+            )
+        except DatasetSelectionError as e:
+            raise SearchInputError(str(e)) from e
+        self.warnings.extend(ds_warnings)
+        datasets = [FlightDataset(d, self.settings.normalized_dir / d) for d in ds_ids]
         datasets = [d for d in datasets if d.exists()]
         if not datasets:
             raise SearchInputError("no flight datasets available; import flights first")
@@ -448,7 +474,12 @@ class SearchEngine:
                 t0_known,
             )
 
-        grid = build_grid(bbox, q.coarse_grid_m, dem, q.max_candidates_coarse, self.counters)
+        try:
+            grid = build_grid(bbox, q.coarse_grid_m, dem, q.max_candidates_coarse, self.counters)
+        except ValueError as e:
+            raise SearchInputError(
+                f"search area too large for a {q.coarse_grid_m:.0f} m grid: {e}"
+            ) from e
         self._stage(
             "grid_built", n_points=len(grid.grid), dem=grid.dem_source, dem_flags=grid.dem_flags
         )
@@ -919,9 +950,13 @@ class SearchEngine:
             )
             if bd is not None and bk is not None and bd >= bk - 0.25:
                 ok = False
-        if any("exceed the cap" in w for w in self.warnings):
+        caps = [w for w in self.warnings if _TRUNCATION.search(w)]
+        if caps:
             ok = False
-            notes.append("pair cap hit (consistency-prior selection): coverage incomplete")
+            notes.append(
+                "hard cap hit, so some candidates were never scored and this is NOT an "
+                "exhaustive search: " + "; ".join(caps)
+            )
         return ok, "; ".join(notes) if notes else "no truncation"
 
     def _sensitivity(
@@ -1021,6 +1056,7 @@ class SearchEngine:
         seed: int,
     ) -> tuple[str, list[dict]]:
         """Graded verdict for the top hypothesis (see rank.gate_results)."""
+        from aerodoppler.search.events import assess_event
         from aerodoppler.search.rank import gate_results
 
         # fresh scoring in-process to get per-event shift curves (workers drop them)
@@ -1042,7 +1078,8 @@ class SearchEngine:
         # chance match; short clips used to get exactly that (or no sample at all) and the gate
         # then compared the score with a meaningless null. Now the sample count is reported
         # and the gate fails visibly when too few valid offsets exist.
-        offsets = self._null_offsets(ctx, seed)
+        extents = self._curve_extents(ctx, winner, full.t0_abs)
+        offsets, null_diag = self._null_offsets(ctx, seed, extents)
         null_mean, null_std, null_n = [], [], []
         if offsets.size:
             null = _score_point(
@@ -1091,6 +1128,8 @@ class SearchEngine:
             null_offset_range_s=(float(np.abs(offsets).min()), float(np.abs(offsets).max()))
             if offsets.size
             else None,
+            null_diagnostics=null_diag,
+            event_evidence=[assess_event(ev, ctx.c.c_mps) for ev in ctx.events],
             event_flags=[list(f.flags) for f in ctx.feats],
             own_clock_offsets_s=own_offsets,
             margin_distinct_flights_z=margin,
@@ -1100,40 +1139,83 @@ class SearchEngine:
         )
 
     @staticmethod
+    def _curve_extents(
+        ctx: EngineContext, winner: ScoredAssignment, t0_abs: float
+    ) -> list[tuple[float, float] | None]:
+        """Recording-relative time span of each event's predicted curve at the fitted clock
+        (the curve covers the event window plus 30 s, centred on the delayed CPA)."""
+        out: list[tuple[float, float] | None] = []
+        for si, tau, f in zip(
+            winner.assignment.seg_idx, winner.assignment.tau, ctx.feats, strict=True
+        ):
+            if si < 0:
+                out.append(None)
+                continue
+            half = 0.5 * (f.t_end_s - f.t_start_s) + 30.0
+            c = float(tau) - t0_abs
+            out.append((c - half, c + half))
+        return out
+
+    @staticmethod
     def _null_offsets(
         ctx: EngineContext,
         seed: int,
+        extents: list[tuple[float, float] | None] | None = None,
         n_wanted: int = 48,
         min_coverage: float = 0.4,
         min_offset_s: float = 20.0,
-    ) -> np.ndarray:
-        """Random clock offsets for the chance-match null that keep every event's window at
-        least ``min_coverage`` inside the recording while shifting it by at least half its own
-        duration (and ``min_offset_s``), so the curve is tested at a genuinely different
-        alignment of the same recording. Returns an empty array when the clip is too short."""
+        spacing_s: float = 1.0,
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        """Clock offsets for the chance-match null: the same predicted curves, misaligned.
+
+        Scoring only looks at each event's own window, so a shifted curve must still cover at
+        least ``min_coverage`` of that window, and the shift must be at least half the window
+        (and ``min_offset_s``) to be a genuinely different alignment. The admissible offsets
+        form bands of a few tens of seconds around the fitted clock; drawing uniformly over
+        the whole recording (the previous sampler) almost never hit them on long recordings,
+        which is why a 6,380 s clip reported "0 valid samples". Offsets are drawn from the
+        admissible set itself, at least ``spacing_s`` apart. Returns the offsets and a
+        diagnostic describing the admissible set (for the gate text)."""
         t_lo, t_hi = float(ctx.spec.times[0]), float(ctx.spec.times[-1])
         windows = [(float(f.t_start_s), float(f.t_end_s)) for f in ctx.feats]
+        if extents is None:
+            extents = [(a - 30.0, b + 30.0) for a, b in windows]
+        reach = max(
+            [(e[1] - e[0]) + (b - a) for e, (a, b) in zip(extents, windows, strict=True) if e]
+            or [t_hi - t_lo]
+        )
+        grid = np.arange(-reach, reach + 0.5 * spacing_s, 0.5)
+        ok = np.ones(grid.size, dtype=bool)
+        for e, (a, b) in zip(extents, windows, strict=True):
+            dur = max(b - a, 1e-6)
+            ok &= np.abs(grid) >= max(min_offset_s, 0.5 * dur)
+            if e is None:
+                continue
+            c0, c1 = e
+            # shifting the clock by +off moves the curve to [c0 - off, c1 - off]
+            cov = np.minimum(c1 - grid, min(b, t_hi)) - np.maximum(c0 - grid, max(a, t_lo))
+            ok &= cov >= min_coverage * dur
+        admissible = grid[ok]
+        diag: dict[str, Any] = {
+            "admissible_s": float(admissible.size * 0.5),
+            "band": [float(np.abs(admissible).min()), float(np.abs(admissible).max())]
+            if admissible.size
+            else None,
+            "rule": f"shift >= max({min_offset_s:.0f} s, half the event window) and >= "
+            f"{min_coverage:.0%} of the window still covered by the predicted curve",
+        }
+        if admissible.size == 0:
+            return np.array([], dtype=float), diag
         rng = np.random.default_rng(seed)
-        span = t_hi - t_lo
-        draws = rng.uniform(-span, span, 40 * n_wanted)
+        order = rng.permutation(admissible)
         keep: list[float] = []
-        for off in draws:
-            ok = True
-            for a, b in windows:
-                dur = max(b - a, 1e-6)
-                if abs(off) < max(min_offset_s, 0.5 * dur):
-                    ok = False
-                    break
-                # shifting the clock by +off moves the curve to recording-relative [a-off, b-off]
-                inside = min(b - off, t_hi) - max(a - off, t_lo)
-                if inside < min_coverage * dur:
-                    ok = False
-                    break
-            if ok:
+        for off in order:
+            if all(abs(off - k) >= spacing_s for k in keep):
                 keep.append(float(off))
                 if len(keep) >= n_wanted:
                     break
-        return np.array(keep, dtype=float)
+        diag["drawn"] = len(keep)
+        return np.array(sorted(keep), dtype=float), diag
 
     def _distinct_alternatives(
         self,

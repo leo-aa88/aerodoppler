@@ -45,7 +45,7 @@ def test_reconcile_fails_running_job_with_dead_pid(tmp_path):
     assert runner.reconcile_stale_jobs(store) == ["run_dead"]
     job = store.get_search("run_dead")
     assert job is not None
-    assert job["status"] == "failed"
+    assert job["status"] == "interrupted"
     assert job["stage"] == "worker_lost"
 
 
@@ -76,7 +76,7 @@ def test_reconcile_rejects_reused_pid(tmp_path):
 
     assert runner.reconcile_stale_jobs(store) == ["run_reused"]
     job = store.get_search("run_reused")
-    assert job is not None and job["status"] == "failed"
+    assert job is not None and job["status"] == "interrupted"
 
 
 def test_cancel_finalizes_job_when_worker_is_already_dead(tmp_path):

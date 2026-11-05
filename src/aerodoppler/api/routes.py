@@ -1,5 +1,5 @@
-"""HTTP routes (SPEC §11). Localhost-only by default; every recording ingest and search needs
-an explicit owner-permission acknowledgement; no data leaves the machine."""
+"""HTTP routes (SPEC §11). Localhost-only by default; no data leaves the machine. Errors are
+structured (see api/errors.py); long work (imports, searches) runs as persistent jobs."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from aerodoppler import __version__
 from aerodoppler.api import schemas as S
+from aerodoppler.api.errors import api_error, scrub
 from aerodoppler.audio.decode import AudioDecodeError
 from aerodoppler.audio.ridges import DetectorConfig
 from aerodoppler.audio.service import (
@@ -30,7 +31,7 @@ from aerodoppler.audio.service import (
 from aerodoppler.config import Settings
 from aerodoppler.jobs.runner import JobRejected, cancel_search, submit_search
 from aerodoppler.jobs.store import Store
-from aerodoppler.models import SearchRequest, SearchResult
+from aerodoppler.models import SearchMode, SearchRequest, SearchResult
 from aerodoppler.util import safe_filename
 
 router = APIRouter()
@@ -82,9 +83,30 @@ async def create_recording(
     start_time_uncertainty_s: float | None = Form(None),
     synthetic: bool = Form(False),
     notes: str | None = Form(None),
+    date_earliest_utc: str | None = Form(None),
+    date_latest_utc: str | None = Form(None),
+    segment_start_s: float = Form(0.0, ge=0),
+    segment_duration_s: float | None = Form(None, gt=0),
     settings: Settings = Depends(get_settings_dep),
     store: Store = Depends(get_store_dep),
 ) -> S.RecordingCreateResponse:
+    """Upload a file. ``start_time_utc`` is the UTC time of the file's first sample (with
+    its uncertainty); files longer than the analysis limit are analysed in segments."""
+    from aerodoppler.audio.service import TimeMetadataError, check_time_metadata
+
+    empty = lambda v: v if v not in ("", None) else None  # noqa: E731 (form fields)
+    recording_date_utc, start_time_utc = empty(recording_date_utc), empty(start_time_utc)
+    date_earliest_utc, date_latest_utc = empty(date_earliest_utc), empty(date_latest_utc)
+    try:
+        check_time_metadata(
+            recording_date_utc,
+            start_time_utc,
+            start_time_uncertainty_s,
+            date_earliest_utc,
+            date_latest_utc,
+        )
+    except TimeMetadataError as e:
+        raise api_error(422, "time_metadata", str(e), field=e.field, action=e.action) from e
     name = safe_filename(file.filename or "upload.wav")
     limit = settings.max_upload_mb * 1024 * 1024
     with tempfile.TemporaryDirectory() as td:
@@ -97,8 +119,12 @@ async def create_recording(
                     break
                 size += len(chunk)
                 if size > limit:
-                    raise HTTPException(
-                        status_code=413, detail=f"upload exceeds {settings.max_upload_mb} MB"
+                    raise api_error(
+                        413,
+                        "upload_too_large",
+                        f"the file exceeds the {settings.max_upload_mb} MB upload limit",
+                        field="file",
+                        action="extract the audio track (e.g. ffmpeg -i video.mp4 -vn -c:a flac out.flac) or raise AERODOPPLER_MAX_UPLOAD_MB",
                     )
                 fh.write(chunk)
         try:
@@ -113,20 +139,68 @@ async def create_recording(
                 start_time_uncertainty_s=start_time_uncertainty_s,
                 synthetic=synthetic,
                 notes=notes,
+                segment_start_s=segment_start_s,
+                segment_duration_s=segment_duration_s,
+                date_earliest_utc=date_earliest_utc,
+                date_latest_utc=date_latest_utc,
             )
         except AudioDecodeError as e:
-            raise HTTPException(status_code=422, detail=f"audio could not be decoded: {e}") from e
+            raise api_error(
+                422,
+                "decode_failed",
+                f"audio could not be decoded: {e}",
+                field="file",
+                action="check that the file plays; for videos the first audio track is used",
+            ) from e
+    return S.RecordingCreateResponse(recording=rec, warnings=_recording_warnings(rec))
+
+
+def _recording_warnings(rec: Any) -> list[str]:
+    from aerodoppler.audio.service import segment_notice
+
     warnings = []
-    if rec.truncated:
+    note = segment_notice(rec)
+    if note:
+        warnings.append(note)
+    if rec.time_basis == "upper_bound_only":
         warnings.append(
-            f"recording exceeded the {settings.max_audio_duration_s:.0f} s limit; "
-            "only the beginning was included in the analysis copy"
+            f"only an upper bound on the date is known (recorded on or before "
+            f"{rec.date_latest_utc}); flight matching needs the UTC day, so a search is not "
+            "possible until the day is established"
         )
-    if not rec.recording_date_utc and not rec.start_time_utc:
+    elif rec.time_basis == "date_range":
         warnings.append(
-            "no recording date/time supplied: a search will need --date (unknown-time) or --start-utc (known-time)"
+            f"the day is only known to lie between {rec.date_earliest_utc} and "
+            f"{rec.date_latest_utc}; each candidate day needs its own ~3.5 GB flight archive"
         )
-    return S.RecordingCreateResponse(recording=rec, warnings=warnings)
+    elif rec.time_basis == "unknown":
+        warnings.append(
+            "no recording date or time: flight matching needs at least the UTC day "
+            "(unknown-time mode) or the UTC start time (known-time mode)"
+        )
+    return warnings
+
+
+@router.post("/api/recordings/{rec_id}/segments", status_code=201)
+def create_recording_segment(
+    rec_id: str,
+    body: S.SegmentRequest,
+    settings: Settings = Depends(get_settings_dep),
+    store: Store = Depends(get_store_dep),
+) -> S.RecordingCreateResponse:
+    """Analyse another interval of the same preserved source file (e.g. the rest of a file
+    longer than the analysis limit). Creates a new recording; times map back to the source."""
+    from aerodoppler.audio.service import create_segment
+
+    try:
+        rec = create_segment(
+            store, settings, _safe_id(rec_id, "recording"), body.start_s, body.duration_s
+        )
+    except NotFound as e:
+        raise api_error(404, "recording_not_found", "recording not found") from e
+    except AudioDecodeError as e:
+        raise api_error(422, "segment_invalid", str(e), field="start_s") from e
+    return S.RecordingCreateResponse(recording=rec, warnings=_recording_warnings(rec))
 
 
 @router.get("/api/recordings", response_model=S.RecordingList)
@@ -212,11 +286,36 @@ def add_event(
     return S.EventList(events=[ev])
 
 
+def _with_assessment(events: list[Any]) -> list[Any]:
+    from aerodoppler.search.events import assess_event
+
+    return [e.model_copy(update={"assessment": assess_event(e)}) for e in events]
+
+
 @router.get("/api/recordings/{rec_id}/events", response_model=S.EventList)
 def list_events(rec_id: str, store: Store = Depends(get_store_dep)) -> S.EventList:
     if store.get_recording(_safe_id(rec_id, "recording")) is None:
-        raise HTTPException(status_code=404, detail="recording not found")
-    return S.EventList(events=store.list_events(rec_id))
+        raise api_error(404, "recording_not_found", "recording not found")
+    return S.EventList(events=_with_assessment(store.list_events(rec_id)))
+
+
+@router.post("/api/recordings/{rec_id}/events/{event_id}/review", response_model=S.EventList)
+def review_event(
+    rec_id: str, event_id: str, body: S.EventReview, store: Store = Depends(get_store_dep)
+) -> S.EventList:
+    """Record the operator's judgement of an event. The measured label never changes; an
+    accepted 'tonal ridge only' event may then be used in a search, and the override is
+    recorded in that search's manifest."""
+    from aerodoppler.models import utc_now_iso
+
+    ev = store.get_event(_safe_id(event_id, "event"))
+    if ev is None or ev.recording_id != rec_id:
+        raise api_error(404, "event_not_found", "event not found")
+    extra = dict(ev.extra or {})
+    extra["review"] = {"accepted": body.accepted, "note": body.note, "at": utc_now_iso()}
+    ev = store.add_event(ev.model_copy(update={"extra": extra, "assessment": None}))
+    store.audit("event.review", ev.id, extra["review"])
+    return S.EventList(events=_with_assessment([ev]))
 
 
 @router.post("/api/recordings/{rec_id}/events/detect", response_model=S.EventList)
@@ -229,6 +328,7 @@ async def detect_events(
     body = body or S.DetectRequest()
     if store.get_recording(_safe_id(rec_id, "recording")) is None:
         raise HTTPException(status_code=404, detail="recording not found")
+    diag: dict[str, Any] = {}
     try:
         events = await asyncio.to_thread(
             propose_events,
@@ -237,10 +337,12 @@ async def detect_events(
             rec_id,
             DetectorConfig(threshold_z=body.threshold_z, min_duration_s=body.min_duration_s),
             body.save,
+            True,
+            diag,
         )
     except NotFound as e:
-        raise HTTPException(status_code=404, detail="recording not found") from e
-    return S.EventList(events=events)
+        raise api_error(404, "recording_not_found", "recording not found") from e
+    return S.EventList(events=_with_assessment(events), diagnostics=diag)
 
 
 @router.delete("/api/recordings/{rec_id}/events/{event_id}")
@@ -305,49 +407,333 @@ def flight_dataset_detail(
     return {"manifest": ds.manifest(), "coverage": FlightIndex([ds]).coverage_summary()}
 
 
-@router.post("/api/flight-datasets/import", response_model=S.FlightImportResponse)
-async def flight_import(
-    body: S.FlightImportRequest, settings: Settings = Depends(get_settings_dep)
-) -> S.FlightImportResponse:
-    from aerodoppler.adsb.adsblol import AdsbLolProvider, ProviderUnavailable
-    from aerodoppler.adsb.ingest import ImportRequest, StorageBudgetExceeded, import_flights
-    from aerodoppler.adsb.providers import LocalTraceProvider
+@router.post("/api/flight-datasets/import", status_code=202)
+def flight_import(
+    body: S.FlightImportRequest,
+    settings: Settings = Depends(get_settings_dep),
+    store: Store = Depends(get_store_dep),
+) -> dict[str, Any]:
+    """Start (or reuse) a persistent import job; poll ``/api/imports/{id}`` for progress.
 
-    if body.provider == "local":
-        if not body.local_path:
-            raise HTTPException(status_code=422, detail="local_path required for provider=local")
-        p = Path(body.local_path).resolve()
-        if not p.exists():
-            raise HTTPException(status_code=422, detail="local_path does not exist")
-        prov: Any = LocalTraceProvider(p)
-    else:
-        prov = AdsbLolProvider(offline=settings.offline)
-    req = ImportRequest(
-        date_utc=body.date_utc,
-        bbox=body.bbox,
-        margin_km=body.margin_km,
-        storage_budget_gb=body.storage_budget_gb,
-        confirm_download=body.confirm_download,
-    )
+    Cheap checks happen here, before any job or download: date format, a day that has not
+    ended or predates the archive, a missing local path, an unconfirmed multi-GB download."""
+    import datetime as dt
+
+    from aerodoppler.adsb.adsblol import ARCHIVE_FIRST_DAY, availability_kind_for_missing
+    from aerodoppler.adsb.ingest import dataset_id_for
+    from aerodoppler.jobs.imports import ImportRejected, submit_import
+
     try:
-        ds = await asyncio.to_thread(
-            import_flights, prov, req, settings.raw_dir, settings.normalized_dir, False
-        )
-    except StorageBudgetExceeded as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except ProviderUnavailable as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
-    m = ds.manifest()
-    return S.FlightImportResponse(
-        dataset_id=ds.dataset_id,
-        summary=m["summary"],
-        filter_counts={k: v for k, v in m["filter_counts"].items() if k != "errors"},
-        storage_bytes=m["storage_bytes"],
-        license=m["license"],
+        day = dt.date.fromisoformat(body.date_utc)
+    except ValueError as e:
+        raise api_error(
+            422, "invalid_date", f"{body.date_utc} is not a valid date", field="date_utc"
+        ) from e
+    if body.provider == "local":
+        if not body.local_path or not Path(body.local_path).exists():
+            raise api_error(
+                422,
+                "local_path_missing",
+                "a local provider needs an existing local_path",
+                field="local_path",
+            )
+    else:
+        kind = availability_kind_for_missing(body.date_utc)
+        if kind == "future_date":
+            raise api_error(
+                422,
+                "future_date",
+                f"{body.date_utc} (UTC) has not ended yet, so ADSB.lol cannot have its archive. "
+                "Days are published a few hours after they end.",
+                field="date_utc",
+                action="pick a past UTC day",
+            )
+        if kind == "before_archive_start":
+            raise api_error(
+                422,
+                "before_archive_start",
+                f"ADSB.lol archives start on {ARCHIVE_FIRST_DAY.isoformat()}; there is no flight "
+                f"data for {day.isoformat()} from this provider, so flight matching is impossible "
+                "for this recording.",
+                field="date_utc",
+            )
+        if not body.confirm_download and body.storage_budget_gb is None:
+            raise api_error(
+                409,
+                "download_not_confirmed",
+                "ADSB.lol publishes one whole-sky archive per UTC day (about 3.5 GB). It is "
+                "downloaded once and cached, even for a small area, because the upstream format "
+                "cannot be subset remotely.",
+                field="confirm_download",
+                action="tick the download confirmation and retry",
+            )
+    ds_id = dataset_id_for(
+        "local" if body.provider == "local" else "adsblol",
+        body.date_utc,
+        body.bbox,
+        body.margin_km,
+        body.exclude_jets,
     )
+    if not body.force and (settings.normalized_dir / ds_id / "manifest.json").exists():
+        return {"outcome": "exists", "dataset_id": ds_id, "job": None}
+    request = body.model_dump()
+    request["bbox"] = body.bbox.model_dump()
+    try:
+        job, outcome = submit_import(store, settings, request)
+    except ImportRejected as e:
+        raise api_error(
+            429, "import_slot_busy", str(e), action="wait for it or cancel it on the Jobs page"
+        ) from e
+    return {"outcome": outcome, "dataset_id": ds_id, "job": _import_view(job)}
+
+
+def _import_view(job: dict[str, Any]) -> dict[str, Any]:
+    from aerodoppler.jobs.proc import is_stalled, job_process_alive
+
+    out = {k: v for k, v in job.items() if k not in ("pid_started_at",)}
+    out["kind"] = "import"
+    out["stalled"] = is_stalled(job)
+    out["worker_alive"] = job_process_alive(job) if job["status"] == "running" else False
+    if out.get("error"):
+        out["error"] = scrub(out["error"])
+    return out
+
+
+@router.get("/api/imports")
+def list_imports(store: Store = Depends(get_store_dep)) -> dict[str, Any]:
+    from aerodoppler.jobs.imports import reconcile_stale_imports
+
+    reconcile_stale_imports(store)
+    return {"imports": [_import_view(j) for j in store.list_imports()]}
+
+
+@router.get("/api/imports/{import_id}")
+def get_import(import_id: str, store: Store = Depends(get_store_dep)) -> dict[str, Any]:
+    from aerodoppler.jobs.imports import reconcile_stale_imports
+
+    reconcile_stale_imports(store)
+    job = store.get_import(_safe_id(import_id, "import"))
+    if job is None:
+        raise api_error(404, "not_found", "import not found")
+    return _import_view(job)
+
+
+@router.get("/api/imports/{import_id}/log")
+def import_log(
+    import_id: str, lines: int = Query(200, ge=1, le=5000), store: Store = Depends(get_store_dep)
+) -> dict[str, Any]:
+    job = store.get_import(_safe_id(import_id, "import"))
+    if job is None:
+        raise api_error(404, "not_found", "import not found")
+    p = Path(job["log_path"]) if job.get("log_path") else None
+    text = p.read_text(errors="replace").splitlines()[-lines:] if p and p.exists() else []
+    return {"lines": [scrub(t) for t in text]}
+
+
+@router.post("/api/imports/{import_id}/cancel")
+def cancel_import_route(import_id: str, store: Store = Depends(get_store_dep)) -> dict[str, Any]:
+    from aerodoppler.jobs.imports import cancel_import
+
+    if not cancel_import(store, _safe_id(import_id, "import")):
+        raise api_error(409, "not_running", "this import is not running")
+    job = store.get_import(import_id)
+    assert job is not None
+    return _import_view(job)
+
+
+@router.post("/api/imports/{import_id}/retry", status_code=202)
+def retry_import(
+    import_id: str,
+    settings: Settings = Depends(get_settings_dep),
+    store: Store = Depends(get_store_dep),
+) -> dict[str, Any]:
+    """Start a new job with the same request (cached and partial downloads are reused)."""
+    from aerodoppler.jobs.imports import ImportRejected, submit_import
+
+    job = store.get_import(_safe_id(import_id, "import"))
+    if job is None:
+        raise api_error(404, "not_found", "import not found")
+    if job["status"] in ("queued", "running"):
+        raise api_error(409, "still_running", "this import is still running")
+    try:
+        new, outcome = submit_import(store, settings, job["request"])
+    except ImportRejected as e:
+        raise api_error(429, "import_slot_busy", str(e)) from e
+    return {"outcome": outcome, "job": _import_view(new)}
+
+
+@router.get("/api/jobs")
+def all_jobs(
+    settings: Settings = Depends(get_settings_dep), store: Store = Depends(get_store_dep)
+) -> dict[str, Any]:
+    """Every job on this machine (all recordings), with live counts and resource limits."""
+    from aerodoppler.jobs.imports import reconcile_stale_imports
+    from aerodoppler.jobs.proc import is_stalled
+    from aerodoppler.jobs.runner import reconcile_stale_jobs
+    from aerodoppler.resources import disk_free_bytes, snapshot
+
+    reconcile_stale_jobs(store)
+    reconcile_stale_imports(store)
+    searches = store.list_searches()[:50]
+    imports = store.list_imports(limit=50)
+    recs = {r.id: r.original_filename for r in store.list_recordings()}
+    sv = []
+    for j in searches:
+        sv.append(
+            {
+                "kind": "search",
+                "id": j["id"],
+                "recording_id": j["recording_id"],
+                "recording": recs.get(j["recording_id"]),
+                "status": j["status"],
+                "stage": j["stage"],
+                "created_at": j["created_at"],
+                "updated_at": j["updated_at"],
+                "error": scrub(j["error"]) if j.get("error") else None,
+                "progress": j["progress"],
+                "stalled": is_stalled(j),
+                "mode": (j["request"] or {}).get("mode"),
+            }
+        )
+    return {
+        "searches": sv,
+        "imports": [_import_view(j) for j in imports],
+        "counts": {
+            "searches_active": sum(1 for j in searches if j["status"] in ("queued", "running")),
+            "searches_limit": settings.max_concurrent_jobs,
+            "imports_active": sum(1 for j in imports if j["status"] in ("queued", "running")),
+            "imports_limit": settings.max_concurrent_imports,
+        },
+        "resources": {
+            **snapshot().as_dict(),
+            "data_dir": str(settings.data_dir),
+            "disk_free_gb": round(disk_free_bytes(settings.data_dir) / 1e9, 1),
+        },
+    }
 
 
 # ---- searches ---------------------------------------------------------------------------
+
+
+def _validated_search(
+    body: S.SearchCreateRequest, settings: Settings, store: Store
+) -> tuple[Any, SearchRequest]:
+    """Check every prerequisite of a search and return ``(recording, request)`` with the
+    flight datasets resolved explicitly; raises structured errors naming field and fix."""
+    import datetime as dt
+
+    from aerodoppler.search.datasets import DatasetSelectionError, resolve_datasets, search_dates
+
+    rec = store.get_recording(_safe_id(body.recording_id, "recording"))
+    if rec is None:
+        raise api_error(404, "recording_not_found", "recording not found", field="recording_id")
+    from aerodoppler.search.events import assess_event, usable_as_evidence
+
+    for eid in body.event_ids:
+        ev = store.get_event(_safe_id(eid, "event"))
+        if ev is None or ev.recording_id != rec.id:
+            raise api_error(
+                404,
+                "event_not_found",
+                f"event {eid} is not an event of this recording",
+                field="event_ids",
+            )
+        a = assess_event(ev)
+        if not usable_as_evidence(a):
+            raise api_error(
+                422,
+                "event_not_doppler",
+                f"event {eid} ({ev.audio_start_s:.0f}–{ev.audio_end_s:.0f} s) is a tonal ridge "
+                f"without a measurable Doppler transition: {'; '.join(a['reasons'])}. It cannot "
+                "locate the recording.",
+                field="event_ids",
+                action="deselect it, or review it in the Spectrogram lab and accept it if you are sure it is an aircraft",
+                event_id=eid,
+            )
+    if body.mode == SearchMode.KNOWN_TIME:
+        if not body.start_utc:
+            raise api_error(
+                422,
+                "start_utc_required",
+                "Known-time mode needs the recording's verified start time in UTC.",
+                field="start_utc",
+                action="enter it (e.g. 2026-11-03T15:30:00Z), or use unknown-time mode with the UTC date",
+            )
+        try:
+            t = dt.datetime.fromisoformat(body.start_utc.replace("Z", "+00:00"))
+        except ValueError as e:
+            raise api_error(
+                422,
+                "start_utc_invalid",
+                f"'{body.start_utc}' is not an ISO-8601 UTC time",
+                field="start_utc",
+                action="use the form 2026-11-03T15:30:00Z",
+            ) from e
+        if t.tzinfo is None:
+            raise api_error(
+                422,
+                "start_utc_no_timezone",
+                "the start time has no timezone",
+                field="start_utc",
+                action="add Z for UTC or an explicit offset",
+            )
+        if body.start_uncertainty_s is None:
+            raise api_error(
+                422,
+                "uncertainty_required",
+                "Known-time mode needs the uncertainty of that start time in seconds.",
+                field="start_uncertainty_s",
+                action="enter how far off the start time could be (e.g. 10 for a synced phone clock)",
+            )
+    else:
+        if not body.date_utc:
+            raise api_error(
+                422,
+                "date_required",
+                "Unknown-time mode needs the recording's UTC date.",
+                field="date_utc",
+            )
+        if len(body.event_ids) < 2:
+            raise api_error(
+                422,
+                "two_events_required",
+                "Unknown-time mode needs two events (two aircraft passes): their time "
+                "separation is what replaces the unknown clock.",
+                field="event_ids",
+                action="detect or draw a second event, or use known-time mode if the start time is known",
+            )
+    try:
+        req = SearchRequest(**body.model_dump())
+    except ValueError as e:
+        raise api_error(422, "invalid_search", str(e)) from e
+    try:
+        ds_ids, _warn = resolve_datasets(
+            settings.normalized_dir,
+            dates=search_dates(
+                req.date_utc, req.start_utc, rec.duration_s, float(req.start_uncertainty_s or 0.0)
+            ),
+            recording_synthetic=rec.synthetic,
+            requested=req.flight_dataset_ids,
+            bbox=req.bbox,
+            allow_date_mismatch=req.allow_date_mismatch,
+            allow_synthetic_mix=req.allow_synthetic_mix,
+        )
+    except DatasetSelectionError as e:
+        raise api_error(422, e.code, str(e), field=e.field, action=e.action) from e
+    return rec, req.model_copy(update={"flight_dataset_ids": ds_ids})
+
+
+@router.post("/api/searches/estimate")
+def estimate_search(
+    body: S.SearchCreateRequest,
+    settings: Settings = Depends(get_settings_dep),
+    store: Store = Depends(get_store_dep),
+) -> dict[str, Any]:
+    """Dry run: validate the request and count the work, without starting a job."""
+    from aerodoppler.search.estimate import estimate_workload
+
+    rec, req = _validated_search(body, settings, store)
+    return estimate_workload(settings, rec, req)
 
 
 @router.post("/api/searches", response_model=S.SearchStatus, status_code=202)
@@ -356,27 +742,26 @@ def create_search(
     settings: Settings = Depends(get_settings_dep),
     store: Store = Depends(get_store_dep),
 ) -> S.SearchStatus:
-    rec = store.get_recording(_safe_id(body.recording_id, "recording"))
-    if rec is None:
-        raise HTTPException(status_code=404, detail="recording not found")
-    for eid in body.event_ids:
-        ev = store.get_event(_safe_id(eid, "event"))
-        if ev is None or ev.recording_id != rec.id:
-            raise HTTPException(status_code=404, detail=f"event {eid} not found for this recording")
-    try:
-        req = SearchRequest(**body.model_dump())
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+    """Validate every prerequisite before a job exists; errors name the field and the fix."""
+    _rec, req = _validated_search(body, settings, store)
     area = req.bbox.approx_area_km2() if req.bbox else 0
     if area > 40_000 and not req.national_scale_confirmed:
-        raise HTTPException(
-            status_code=422,
-            detail=f"bbox area {area:.0f} km² is a large-scale search; set national_scale_confirmed=true to run it (slow, resource intensive)",
+        raise api_error(
+            422,
+            "large_area_unconfirmed",
+            f"the search area is {area:.0f} km²; areas above 40,000 km² are slow and memory heavy",
+            field="national_scale_confirmed",
+            action="confirm the large-scale search or shrink the area",
         )
     try:
         run_id = submit_search(store, settings, req)
     except JobRejected as e:
-        raise HTTPException(status_code=429, detail=str(e)) from e
+        raise api_error(
+            429,
+            "search_slots_full",
+            str(e),
+            action="wait for a search to finish or cancel one on the Jobs page",
+        ) from e
     return _status(store, run_id)
 
 

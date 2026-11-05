@@ -84,13 +84,28 @@ def flights_import(
     confirm_download: bool = typer.Option(
         False, "--confirm-download", help="accept the whole-day archive size"
     ),
-    workers: int = typer.Option(0, "--workers", help="parallel parsers (0 = cpu count - 1)"),
+    workers: int = typer.Option(
+        0, "--workers", help="parallel parsers (0 = as many as the memory budget allows)"
+    ),
+    memory_budget_mb: float | None = typer.Option(
+        None,
+        "--memory-budget-mb",
+        help="peak RAM for the whole import incl. parser processes (default: half of available, max 4096)",
+    ),
+    exclude_jets: bool = typer.Option(
+        False, "--exclude-jets", help="drop aircraft classified as jets while parsing"
+    ),
     gap_split_s: float | None = typer.Option(None, "--gap-split-s"),
     offline: bool = typer.Option(False, "--offline"),
 ) -> None:
     """Download/import one UTC day of flights for a bounding box and normalise to Parquet."""
     from aerodoppler.adsb.adsblol import AdsbLolProvider, ProviderUnavailable
-    from aerodoppler.adsb.ingest import ImportRequest, StorageBudgetExceeded, import_flights
+    from aerodoppler.adsb.ingest import (
+        ImportRequest,
+        MemoryBudgetExceeded,
+        StorageBudgetExceeded,
+        import_flights,
+    )
     from aerodoppler.adsb.providers import LocalTraceProvider
 
     s = get_settings()
@@ -103,15 +118,15 @@ def flights_import(
         prov = LocalTraceProvider(path, source_label="local")
     else:
         raise typer.BadParameter("provider must be adsblol or local")
-    import multiprocessing as mp
-
     req = ImportRequest(
         date_utc=date,
         bbox=bb,
         margin_km=s.adsb_bbox_margin_km if margin_km is None else margin_km,
         storage_budget_gb=storage_budget_gb,
         confirm_download=confirm_download,
-        workers=workers or max(1, mp.cpu_count() - 1),
+        workers=workers,
+        memory_budget_mb=memory_budget_mb,
+        exclude_jets=exclude_jets,
         gap_split_s=s.adsb_gap_split_s if gap_split_s is None else gap_split_s,
     )
     try:
@@ -120,8 +135,11 @@ def flights_import(
         typer.secho(str(e), fg=typer.colors.YELLOW, err=True)
         raise typer.Exit(code=3) from e
     except ProviderUnavailable as e:
-        typer.secho(f"provider unavailable: {e}", fg=typer.colors.RED, err=True)
+        typer.secho(f"archive unavailable ({e.kind}): {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=4) from e
+    except MemoryBudgetExceeded as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=5) from e
     man = ds.manifest()
     typer.echo(
         json.dumps(
@@ -131,6 +149,7 @@ def flights_import(
                 "filter_counts": {k: v for k, v in man["filter_counts"].items() if k != "errors"},
                 "storage_bytes": man["storage_bytes"],
                 "license": man["license"],
+                "resources": man.get("resources"),
             },
             indent=2,
         )

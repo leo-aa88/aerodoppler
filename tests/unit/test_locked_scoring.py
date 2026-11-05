@@ -151,18 +151,42 @@ def test_confidence_gates_grading():
     assert grade == "medium"
     assert not next(g for g in gates if g["name"] == "event_shape")["passed"]
     assert gate_results(**{**good, "event_flags": [["short_event"], []]})[0] == "high"
-    # single event is enough in known-time mode
-    assert (
-        gate_results(
-            **{
-                **good,
-                "mode_known_time": True,
-                "per_event_scores": [4.0],
-                "per_event_coverage": [0.9],
-                "null_mean": [0.5],
-                "null_std": [0.4],
-                "own_clock_offsets_s": [0.0],
-            }
-        )[0]
-        == "high"
+    # a single event can reach medium in known-time mode but never high: one event cannot
+    # corroborate the clock it was fitted to
+    single = {
+        **good,
+        "mode_known_time": True,
+        "per_event_scores": [4.0],
+        "per_event_coverage": [0.9],
+        "null_mean": [0.5],
+        "null_std": [0.4],
+        "own_clock_offsets_s": [0.0],
+        "null_n": [48],
+        "event_flags": [[]],
+    }
+    grade, gates = gate_results(**single)
+    assert grade == "medium"
+    clock = next(g for g in gates if g["name"] == "clock_lock")
+    assert not clock["passed"] and "single event" in clock["detail"]
+    # evidence: a tonal-only event keeps any result at low, even after operator review;
+    # a weak transition caps it at medium
+    tonal = {"label": "tonal_only", "reasons": ["flat"], "review": {"accepted": True}}
+    plausible = {"label": "plausible_doppler", "reasons": []}
+    weak = {"label": "weak_doppler", "reasons": []}
+    grade, gates = gate_results(**{**good, "event_evidence": [plausible, tonal]})
+    assert grade == "low"
+    ev_gate = next(g for g in gates if g["name"] == "event_evidence")
+    assert not ev_gate["passed"] and "accepted by operator review" in ev_gate["detail"]
+    assert gate_results(**{**good, "event_evidence": [plausible, weak]})[0] == "medium"
+    assert gate_results(**{**good, "event_evidence": [plausible, plausible]})[0] == "high"
+    # the not-estimable text names the actual cause
+    _g, gates = gate_results(
+        **{**good, "null_n": [48, 3], "null_diagnostics": {"band": [24.0, 58.0], "drawn": 48}}
     )
+    core = next(g for g in gates if g["name"] == "core_matches")
+    assert "only 3 of 48 shifts in the admissible band 24–58 s" in core["detail"]
+    _g, gates = gate_results(
+        **{**good, "null_n": [48, 0], "null_diagnostics": {"band": None, "rule": "R"}}
+    )
+    core = next(g for g in gates if g["name"] == "core_matches")
+    assert "no clock shift satisfies R" in core["detail"]

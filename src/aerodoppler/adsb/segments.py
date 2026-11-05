@@ -75,7 +75,9 @@ def split_segments(
         return samples.with_columns(pl.lit(None, dtype=pl.Utf8).alias("segment_id")), pl.DataFrame(
             schema=SEGMENT_SCHEMA
         )
-    df = samples.sort(["source", "icao24", "t"]).unique(
+    # full sort key: parallel parsing delivers traces in completion order, and duplicate
+    # timestamps must resolve the same way on every run (reproducible segment tables)
+    df = samples.sort(["source", "icao24", "t", "lat", "lon"], nulls_last=True).unique(
         subset=["source", "icao24", "t"], keep="first", maintain_order=True
     )
     seg_ids: list[str] = []

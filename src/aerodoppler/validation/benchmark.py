@@ -404,6 +404,8 @@ def run_real_trajectory_benchmark(
                     date_utc=truth["date_utc"],
                     bbox=local_bbox,
                     flight_dataset_ids=[dataset_id],
+                    # semi-synthetic by design: simulated audio over REAL ADS-B tracks
+                    allow_synthetic_mix=True,
                     operator_authorized=True,
                     quality_settings=QualitySettings(
                         workers=workers, max_assignments=max_assignments
@@ -473,6 +475,8 @@ def run_real_trajectory_benchmark(
                         date_utc=truth["date_utc"],
                         bbox=local_bbox,
                         flight_dataset_ids=[dataset_id],
+                        # semi-synthetic by design: simulated audio over REAL ADS-B tracks
+                        allow_synthetic_mix=True,
                         operator_authorized=True,
                         quality_settings=QualitySettings(
                             workers=workers, max_assignments=max_assignments

@@ -50,27 +50,105 @@ class FlightDataset:
         return self.segments_path.exists()
 
 
+class DatasetWriter:
+    """Incremental, atomic dataset writer.
+
+    Parts are written into ``<root>.partial/`` (samples per date/region as ``part-<k>``) and
+    the directory replaces ``<root>`` only in :meth:`finalize`, so a crash or cancellation
+    never leaves a half-written dataset where the index would find it. Only the segment table
+    (one row per segment) is held in memory; samples are written as each part arrives.
+    """
+
+    def __init__(self, root: Path, dataset_id: str):
+        import shutil
+
+        self.root = root
+        self.dataset_id = dataset_id
+        self.tmp = root.with_name(root.name + ".partial")
+        if self.tmp.exists():
+            shutil.rmtree(self.tmp)
+        self.tmp.mkdir(parents=True)
+        self._segments: list[pl.DataFrame] = []
+        self.summary: dict[str, Any] = {
+            "samples": 0,
+            "aircraft": 0,
+            "first_utc": None,
+            "last_utc": None,
+            "lat_range": None,
+            "lon_range": None,
+            "hour_histogram": {},
+        }
+
+    def add(
+        self, samples: pl.DataFrame, segments: pl.DataFrame, part: int, day0_unix: float | None
+    ) -> None:
+        """Add one part. Parts must hold disjoint aircraft (the importer buckets by icao24)."""
+        if not segments.is_empty():
+            self._segments.append(segments)
+        if samples.is_empty():
+            return
+        seg_region = segments.select(["segment_id", "date_utc", "region"])
+        s = samples.join(seg_region, on="segment_id", how="left")
+        for (date, region), grp in s.group_by(["date_utc", "region"], maintain_order=True):
+            d = self.tmp / "samples" / f"date={date}" / f"region={region}"
+            d.mkdir(parents=True, exist_ok=True)
+            grp.drop(["date_utc", "region"]).write_parquet(
+                d / f"part-{part}.parquet", compression="zstd"
+            )
+        sm = self.summary
+        sm["samples"] += samples.height
+        sm["aircraft"] += samples["icao24"].n_unique()
+        t_lo, t_hi = float(samples["t"].min()), float(samples["t"].max())
+        sm["first_utc"] = t_lo if sm["first_utc"] is None else min(sm["first_utc"], t_lo)
+        sm["last_utc"] = t_hi if sm["last_utc"] is None else max(sm["last_utc"], t_hi)
+        for key, col in (("lat_range", "lat"), ("lon_range", "lon")):
+            lo, hi = float(samples[col].min()), float(samples[col].max())
+            cur = sm[key]
+            sm[key] = [lo, hi] if cur is None else [min(cur[0], lo), max(cur[1], hi)]
+        if day0_unix is not None:
+            hist = (
+                samples.select(((pl.col("t") - day0_unix) // 3600).cast(pl.Int64).alias("h"))
+                .group_by("h")
+                .len()
+            )
+            for h, n in hist.iter_rows():
+                sm["hour_histogram"][str(int(h))] = sm["hour_histogram"].get(str(int(h)), 0) + int(
+                    n
+                )
+
+    def segments(self) -> pl.DataFrame:
+        return pl.concat(self._segments) if self._segments else pl.DataFrame(schema=SEGMENT_SCHEMA)
+
+    def finalize(self, manifest: dict[str, Any]) -> FlightDataset:
+        import shutil
+
+        self.segments().write_parquet(self.tmp / "segments.parquet")
+        manifest = dict(manifest)
+        manifest["storage_bytes"] = sum(p.stat().st_size for p in self.tmp.rglob("*.parquet"))
+        (self.tmp / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
+        old = self.root.with_name(self.root.name + ".old")
+        if old.exists():
+            shutil.rmtree(old)
+        if self.root.exists():
+            self.root.rename(old)
+        self.tmp.rename(self.root)
+        if old.exists():
+            shutil.rmtree(old)
+        return FlightDataset(self.dataset_id, self.root)
+
+    def abort(self) -> None:
+        import shutil
+
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+
 def write_dataset(
     root: Path, samples: pl.DataFrame, segments: pl.DataFrame, manifest: dict[str, Any]
 ) -> FlightDataset:
-    root.mkdir(parents=True, exist_ok=True)
-    ds = FlightDataset(manifest["dataset_id"], root)
-    if samples.is_empty():
-        pl.DataFrame(schema=SEGMENT_SCHEMA).write_parquet(ds.segments_path)
-    else:
-        seg_region = segments.select(["segment_id", "date_utc", "region"])
-        s = samples.join(seg_region, on="segment_id", how="left")
-        for (date, region), part in s.group_by(["date_utc", "region"], maintain_order=True):
-            d = ds.samples_dir / f"date={date}" / f"region={region}"
-            d.mkdir(parents=True, exist_ok=True)
-            part.drop(["date_utc", "region"]).write_parquet(
-                d / "part-0.parquet", compression="zstd"
-            )
-        segments.write_parquet(ds.segments_path)
-    manifest = dict(manifest)
-    manifest["storage_bytes"] = sum(p.stat().st_size for p in root.rglob("*.parquet"))
-    ds.manifest_path.write_text(json.dumps(manifest, indent=2, default=str))
-    return ds
+    """Write a whole in-memory dataset (synthetic/test data) through :class:`DatasetWriter`."""
+    w = DatasetWriter(root, manifest["dataset_id"])
+    w.add(samples, segments, part=0, day0_unix=None)
+    return w.finalize(manifest)
 
 
 def list_datasets(normalized_dir: Path) -> list[FlightDataset]:
@@ -78,6 +156,8 @@ def list_datasets(normalized_dir: Path) -> list[FlightDataset]:
     if not normalized_dir.exists():
         return out
     for d in sorted(normalized_dir.iterdir()):
+        if d.name.endswith((".partial", ".old")):
+            continue
         if (d / "manifest.json").exists():
             out.append(FlightDataset(d.name, d))
     return out

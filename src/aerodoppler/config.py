@@ -27,7 +27,21 @@ class Settings(BaseSettings):
     offline: bool = Field(default=False, description="Refuse every network access when true")
     max_upload_mb: int = 512
     max_audio_duration_s: float = 7200.0
-    max_concurrent_jobs: int = 2
+    max_concurrent_jobs: int = Field(default=2, description="concurrent search workers")
+    max_concurrent_imports: int = Field(
+        default=1, description="concurrent flight-archive imports (each streams a ~3.5 GB day)"
+    )
+    import_memory_budget_mb: float | None = Field(
+        default=None,
+        description="peak RAM per import incl. parser processes; None = half of available, max 4096",
+    )
+    search_memory_budget_mb: float | None = Field(
+        default=None,
+        description="peak RAM (PSS, workers included) per search; None = half of available, max 8192",
+    )
+    github_token: str | None = Field(
+        default=None, description="optional GitHub token for the ADSB.lol release lookups"
+    )
     speed_of_sound_temp_c: float = 20.0
     adsb_gap_split_s: float = 30.0
     adsb_bbox_margin_km: float = 15.0

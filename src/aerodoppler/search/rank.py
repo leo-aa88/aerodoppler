@@ -84,6 +84,8 @@ def gate_results(
     null_n: list[int] | None = None,
     null_offset_range_s: tuple[float, float] | None = None,
     event_flags: list[list[str]] | None = None,
+    null_diagnostics: dict | None = None,
+    event_evidence: list[dict] | None = None,
     track_support: tuple[bool, str] | None = None,
     completeness: tuple[bool, str] | None = None,
     sensitivity: tuple[bool, str] | None = None,
@@ -112,13 +114,27 @@ def gate_results(
     for i, (sc, cov) in enumerate(zip(per_event_scores, per_event_coverage, strict=True)):
         n_null = null_n[i] if null_n is not None else None
         if n_null is not None and n_null < min_null_samples:
-            # no usable null: the recording is too short for enough shifted alignments of this
-            # event's window; fail visibly instead of comparing with a made-up null
+            # no usable null: fail visibly instead of comparing with a made-up null, and say
+            # why (no admissible misalignment at all, or too few valid scores among them)
             ok_events.append(False)
+            nd = null_diagnostics or {}
+            if nd.get("band") is None and null_diagnostics is not None:
+                why = (
+                    "no clock shift satisfies "
+                    + str(nd.get("rule", "the null's rules"))
+                    + " — the event window is too long relative to the predicted curve"
+                )
+            elif null_diagnostics is not None:
+                lo, hi = nd["band"]
+                why = (
+                    f"only {n_null} of {nd.get('drawn', '?')} shifts in the admissible band "
+                    f"{lo:.0f}–{hi:.0f} s gave a valid score"
+                )
+            else:
+                why = "too few valid shifted alignments"
             details.append(
-                f"event {i + 1}: score {sc:.2f}, chance-match null NOT estimable ({n_null} valid "
-                f"random-clock samples inside the recording, need {min_null_samples}; clip too "
-                f"short for this event), coverage {cov:.0%}"
+                f"event {i + 1}: score {sc:.2f}, chance-match null NOT estimable ({n_null} "
+                f"valid samples, need {min_null_samples}: {why}), coverage {cov:.0%}"
             )
             continue
         mu, sd = null_mean[i], max(null_std[i], 1e-6)
@@ -144,12 +160,19 @@ def gate_results(
         }
     )
     offs = [o for o in own_clock_offsets_s if o is not None]
-    clock = all(abs(o) <= clock_tol_s for o in offs) and bool(offs)
+    # one event always "agrees" with the clock fitted to it: that is not corroboration
+    single = len(offs) < 2
+    clock = (not single) and all(abs(o) <= clock_tol_s for o in offs)
     gates.append(
         {
             "name": "clock_lock",
             "passed": clock,
-            "detail": "each event's own best clock offset from the shared clock: "
+            "detail": (
+                "not applicable with a single event: one event cannot corroborate the clock it "
+                "was fitted to (high needs two or more events)"
+            )
+            if single
+            else "each event's own best clock offset from the shared clock: "
             + ", ".join(f"{o:+.1f} s" for o in offs)
             + f" (tolerance ±{clock_tol_s:.0f} s)",
         }
@@ -239,11 +262,41 @@ def gate_results(
             }
         )
         extras_ok = extras_ok and shape_ok
+    # evidence: an event without a measurable Doppler transition carries no location
+    # information, even when an operator accepted it; weak transitions cap the grade
+    ev_cap = "high"
+    if event_evidence is None:
+        gates.append({"name": "event_evidence", "passed": True, "detail": "not evaluated"})
+    else:
+        tonal = [i + 1 for i, a in enumerate(event_evidence) if a.get("label") == "tonal_only"]
+        weak = [i + 1 for i, a in enumerate(event_evidence) if a.get("label") == "weak_doppler"]
+        if tonal:
+            ev_cap = "low"
+            reviewed = [
+                i + 1
+                for i, a in enumerate(event_evidence)
+                if a.get("label") == "tonal_only" and (a.get("review") or {}).get("accepted")
+            ]
+            detail = (
+                f"event(s) {tonal} show no measurable Doppler transition (tonal ridge only)"
+                + (f"; event(s) {reviewed} were accepted by operator review" if reviewed else "")
+                + ": the grade cannot exceed low"
+            )
+        elif weak:
+            ev_cap = "medium"
+            detail = f"event(s) {weak} show only a weak Doppler transition: the grade cannot exceed medium"
+        else:
+            detail = "every event shows a clear Doppler transition"
+        gates.append({"name": "event_evidence", "passed": not tonal and not weak, "detail": detail})
     track_ok = track_support is None or bool(track_support[0])
+    clock_med = clock or single  # a single known-time event may reach medium, never high
     if core and clock and margin_ok and unheard_ok and radius_ok and extras_ok:
         grade = "high"
-    elif core and clock and margin_med and track_ok:
+    elif core and clock_med and margin_med and track_ok:
         grade = "medium"
     else:
         grade = "low"
+    order = {"low": 0, "medium": 1, "high": 2}
+    if order[grade] > order[ev_cap]:
+        grade = ev_cap
     return grade, gates

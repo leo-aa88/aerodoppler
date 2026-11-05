@@ -66,6 +66,12 @@ class ManualEventRequest(BaseModel):
 
 class EventList(BaseModel):
     events: list[DopplerEvent]
+    diagnostics: dict[str, Any] | None = None
+
+
+class EventReview(BaseModel):
+    accepted: bool = Field(..., description="true: I checked it and it is an aircraft pass")
+    note: str | None = Field(default=None, max_length=500)
 
 
 class DetectRequest(BaseModel):
@@ -90,6 +96,13 @@ class FlightDatasetList(BaseModel):
     datasets: list[FlightDatasetInfo]
 
 
+class SegmentRequest(BaseModel):
+    start_s: float = Field(..., ge=0, description="offset into the source file, seconds")
+    duration_s: float | None = Field(
+        default=None, gt=0, description="length; default = up to the analysis limit"
+    )
+
+
 class FlightImportRequest(BaseModel):
     provider: str = Field(default="adsblol", pattern="^(adsblol|local)$")
     date_utc: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
@@ -98,6 +111,10 @@ class FlightImportRequest(BaseModel):
     storage_budget_gb: float | None = Field(default=None, ge=0)
     confirm_download: bool = False
     local_path: str | None = None
+    exclude_jets: bool = False
+    memory_budget_mb: float | None = Field(default=None, ge=256, le=65536)
+    workers: int = Field(default=0, ge=0, le=64)
+    force: bool = False  # re-import even when the dataset already exists
 
 
 class FlightImportResponse(BaseModel):
@@ -122,6 +139,8 @@ class SearchCreateRequest(BaseModel):
     max_cpu_hours: float | None = Field(default=1.0, gt=0, le=48)
     quality_settings: QualitySettings = Field(default_factory=QualitySettings)
     seed: int = 0
+    allow_date_mismatch: bool = False
+    allow_synthetic_mix: bool = False
 
 
 class SearchStatus(BaseModel):

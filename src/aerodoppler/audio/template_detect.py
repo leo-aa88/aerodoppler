@@ -322,6 +322,10 @@ def flyovers_to_events(
                         "score_z": fit.score_z,
                     },
                     "note": "straight-pass template fit seeds only; ridge points are re-measured per frame",
+                    # per-point whitened level: points near noise level only echo the template's
+                    # shape (peak-picking inside a band that follows the template), so the
+                    # evidence assessment uses only the points clearly above noise
+                    "point_z": [round(float(v), 2) for v in z],
                 },
             )
         )

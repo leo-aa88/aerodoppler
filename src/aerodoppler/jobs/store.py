@@ -34,6 +34,14 @@ CREATE TABLE IF NOT EXISTS searches (
   cpu_seconds REAL, peak_rss_mb REAL, pid_started_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_searches_rec ON searches(recording_id);
+CREATE TABLE IF NOT EXISTS imports (
+  id TEXT PRIMARY KEY, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  status TEXT NOT NULL, stage TEXT, request_json TEXT NOT NULL, progress_json TEXT,
+  dedup_key TEXT NOT NULL, dataset_id TEXT, error TEXT, error_kind TEXT, log_path TEXT,
+  pid INTEGER, pid_started_at REAL, heartbeat_at REAL,
+  cancel_requested INTEGER NOT NULL DEFAULT 0, peak_rss_mb REAL
+);
+CREATE INDEX IF NOT EXISTS idx_imports_key ON imports(dedup_key);
 CREATE TABLE IF NOT EXISTS audit (
   seq INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, action TEXT NOT NULL,
   subject TEXT, detail TEXT
@@ -50,9 +58,11 @@ class Store:
         self._lock = threading.Lock()
         with self._conn() as c:
             c.executescript(SCHEMA)
+            # in-place, additive migrations for databases created by older versions
             columns = {row["name"] for row in c.execute("PRAGMA table_info(searches)")}
-            if "pid_started_at" not in columns:
-                c.execute("ALTER TABLE searches ADD COLUMN pid_started_at REAL")
+            for col in ("pid_started_at", "heartbeat_at"):
+                if col not in columns:
+                    c.execute(f"ALTER TABLE searches ADD COLUMN {col} REAL")
 
     @contextmanager
     def _conn(self):
@@ -313,7 +323,7 @@ class Store:
 
     def finish_if_active(self, search_id: str, status: str, stage: str, error: str) -> bool:
         """Move an active job to a terminal state without overwriting worker completion."""
-        if status not in ("failed", "cancelled"):
+        if status not in ("failed", "cancelled", "interrupted"):
             raise ValueError(f"invalid terminal status: {status}")
         with self._conn() as c:
             n = c.execute(
@@ -330,3 +340,95 @@ class Store:
             ).fetchall()
             c.execute("DELETE FROM searches WHERE recording_id=?", (recording_id,))
         return [Path(r["result_dir"]) for r in rows if r["result_dir"]]
+
+    # ---- flight-archive imports ---------------------------------------------------------
+    def create_import_if_capacity(
+        self, import_id: str, request: dict[str, Any], dedup_key: str, max_active: int
+    ) -> tuple[str, str | None]:
+        """Atomically either return an active import with the same ``dedup_key`` ("reused"),
+        refuse because ``max_active`` imports are running ("full"), or insert a new queued
+        row ("created"). Returns ``(outcome, existing_or_new_id)``."""
+        now = utc_now_iso()
+        with self._conn() as c:
+            c.execute("BEGIN IMMEDIATE")
+            row = c.execute(
+                "SELECT id FROM imports WHERE dedup_key=? AND status IN ('queued','running') "
+                "ORDER BY created_at LIMIT 1",
+                (dedup_key,),
+            ).fetchone()
+            if row:
+                c.execute("ROLLBACK")
+                return "reused", row["id"]
+            n = c.execute(
+                "SELECT COUNT(*) AS n FROM imports WHERE status IN ('queued','running')"
+            ).fetchone()["n"]
+            if int(n) >= max_active:
+                c.execute("ROLLBACK")
+                return "full", None
+            c.execute(
+                "INSERT INTO imports(id, created_at, updated_at, status, stage, request_json, "
+                "progress_json, dedup_key) VALUES (?,?,?,?,?,?,?,?)",
+                (import_id, now, now, "queued", "queued", json.dumps(request), "{}", dedup_key),
+            )
+            c.execute("COMMIT")
+        self.audit("import.create", import_id, request)
+        return "created", import_id
+
+    def update_import(self, import_id: str, **fields: Any) -> None:
+        if not fields:
+            return
+        if "progress" in fields:
+            fields["progress_json"] = json.dumps(fields.pop("progress"), default=str)
+        fields["updated_at"] = utc_now_iso()
+        cols = ", ".join(f"{k}=?" for k in fields)
+        with self._conn() as c:
+            c.execute(f"UPDATE imports SET {cols} WHERE id=?", (*fields.values(), import_id))
+
+    def finish_import_if_active(
+        self, import_id: str, status: str, stage: str, error: str | None, error_kind: str | None
+    ) -> bool:
+        if status not in ("succeeded", "failed", "cancelled", "interrupted"):
+            raise ValueError(f"invalid terminal status: {status}")
+        with self._conn() as c:
+            n = c.execute(
+                "UPDATE imports SET status=?, stage=?, error=?, error_kind=?, updated_at=? "
+                "WHERE id=? AND status IN ('queued','running')",
+                (status, stage, error, error_kind, utc_now_iso(), import_id),
+            ).rowcount
+        return n > 0
+
+    def get_import(self, import_id: str) -> dict[str, Any] | None:
+        with self._conn() as c:
+            row = c.execute("SELECT * FROM imports WHERE id=?", (import_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["request"] = json.loads(d.pop("request_json"))
+        d["progress"] = json.loads(d.pop("progress_json") or "{}")
+        d["cancel_requested"] = bool(d["cancel_requested"])
+        return d
+
+    def list_imports(self, active_only: bool = False, limit: int = 100) -> list[dict[str, Any]]:
+        q = "SELECT id FROM imports"
+        if active_only:
+            q += " WHERE status IN ('queued','running')"
+        q += " ORDER BY created_at DESC LIMIT ?"
+        with self._conn() as c:
+            rows = c.execute(q, (limit,)).fetchall()
+        return [j for j in (self.get_import(r["id"]) for r in rows) if j]
+
+    def request_import_cancel(self, import_id: str) -> bool:
+        with self._conn() as c:
+            n = c.execute(
+                "UPDATE imports SET cancel_requested=1, updated_at=? WHERE id=? AND status IN ('queued','running')",
+                (utc_now_iso(), import_id),
+            ).rowcount
+        self.audit("import.cancel", import_id)
+        return n > 0
+
+    def import_cancel_requested(self, import_id: str) -> bool:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT cancel_requested FROM imports WHERE id=?", (import_id,)
+            ).fetchone()
+        return bool(row and row["cancel_requested"])

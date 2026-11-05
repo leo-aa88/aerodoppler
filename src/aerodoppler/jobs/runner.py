@@ -19,11 +19,16 @@ from typing import Any
 import psutil
 
 from aerodoppler.config import Settings
+from aerodoppler.jobs.proc import Heartbeat, job_process_alive, process_start_time
 from aerodoppler.jobs.store import Store
 from aerodoppler.models import SearchRequest, SearchResult
 from aerodoppler.util import new_id
 
 log = logging.getLogger(__name__)
+
+
+class SearchResourceExceeded(RuntimeError):
+    """Raised from the progress callback when a search exceeds its memory budget."""
 
 
 class JobRejected(RuntimeError):
@@ -91,7 +96,7 @@ def submit_search(store: Store, settings: Settings, req: SearchRequest) -> str:
             cancelled = job["cancel_requested"]
             store.finish_if_active(
                 run_id,
-                status="cancelled" if cancelled else "failed",
+                status="cancelled" if cancelled else "interrupted",
                 stage="cancelled" if cancelled else "worker_exited",
                 error=(
                     "cancelled by operator"
@@ -104,28 +109,8 @@ def submit_search(store: Store, settings: Settings, req: SearchRequest) -> str:
     return run_id
 
 
-def _process_start_time(pid: int) -> float | None:
-    try:
-        return psutil.Process(pid).create_time()
-    except (psutil.Error, OSError):
-        return None
-
-
-def _job_process_alive(job: dict[str, Any]) -> bool:
-    pid = job.get("pid")
-    if not pid:
-        return False
-    try:
-        proc = psutil.Process(pid)
-        if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
-            return False
-        expected_start = job.get("pid_started_at")
-        return expected_start is None or abs(proc.create_time() - expected_start) < 1.0
-    except (psutil.NoSuchProcess, psutil.ZombieProcess):
-        return False
-    except psutil.AccessDenied:
-        # A local process we cannot inspect is safer to treat as active than to duplicate.
-        return True
+_process_start_time = process_start_time
+_job_process_alive = job_process_alive
 
 
 def reconcile_stale_jobs(store: Store, queued_grace_s: float = 60.0) -> list[str]:
@@ -139,9 +124,13 @@ def reconcile_stale_jobs(store: Store, queued_grace_s: float = 60.0) -> list[str
             stale = now - updated.astimezone(UTC).timestamp() > queued_grace_s
         if stale and store.finish_if_active(
             job["id"],
-            status="failed",
+            status="interrupted",
             stage="worker_lost",
-            error="worker process is no longer running; the job was interrupted",
+            error=(
+                f"the search worker stopped without finishing (crash, kill, out of memory or "
+                f"machine restart) during stage '{job.get('stage')}'; partial outputs are kept. "
+                "Run the search again to retry."
+            ),
         ):
             store.audit("search.reconciled", job["id"], {"previous_status": job["status"]})
             reconciled.append(job["id"])
@@ -215,13 +204,38 @@ def run_search_inline(
 def _execute(
     store: Store, settings: Settings, req: SearchRequest, run_id: str, out_dir: Path, progress=None
 ) -> SearchResult:
+    from aerodoppler.resources import default_memory_budget_mb, recommend_workers, tree_pss_mb
     from aerodoppler.search.engine import SearchCancelled, SearchEngine, SearchInputError
 
     proc = psutil.Process(os.getpid())
     t0 = time.time()
     counters: dict[str, Any] = {}
+    budget = settings.search_memory_budget_mb or default_memory_budget_mb(cap_mb=8192.0)
+    if not req.quality_settings.workers:
+        # forked scorers share the spectrogram copy-on-write; ~250 MB private each measured
+        # on the dense-traffic benchmark (3.4 GB peak for 6 workers + 2.0 GB parent)
+        req = req.model_copy(
+            update={
+                "quality_settings": req.quality_settings.model_copy(
+                    update={"workers": recommend_workers(budget, 250.0, base_mb=2000.0)}
+                )
+            }
+        )
+    mem = {"last": 0.0, "peak": 0.0}
 
     def _progress(stage: str, info: dict[str, Any]) -> None:
+        now = time.time()
+        if now - mem["last"] >= 2.0:
+            mem["last"] = now
+            used = tree_pss_mb()
+            mem["peak"] = max(mem["peak"], used)
+            if used > 1.5 * budget:
+                raise SearchResourceExceeded(
+                    f"the search used {used:.0f} MB (workers included), above 1.5x its "
+                    f"{budget:.0f} MB budget, during '{stage}'. Use a smaller search area, a "
+                    "coarser grid or a narrower time window, or raise "
+                    "AERODOPPLER_SEARCH_MEMORY_BUDGET_MB."
+                )
         counters[stage] = info
         store.update_search(
             run_id,
@@ -231,6 +245,9 @@ def _execute(
                 "elapsed_s": round(time.time() - t0, 1),
                 "cpu_seconds": round(sum(proc.cpu_times()[:2]), 1),
                 "rss_mb": round(proc.memory_info().rss / 1e6, 1),
+                "tree_pss_peak_mb": round(mem["peak"], 1),
+                "memory_budget_mb": round(budget),
+                "workers": req.quality_settings.workers,
             },
         )
         if progress:
@@ -241,11 +258,16 @@ def _execute(
 
     engine = SearchEngine(store, settings, progress=_progress, cancel_check=_cancelled)
     try:
-        result = engine.run(req, run_id, out_dir)
+        with Heartbeat(lambda: store.update_search(run_id, heartbeat_at=time.time()), 5.0):
+            result = engine.run(req, run_id, out_dir)
     except SearchCancelled:
         store.update_search(
             run_id, status="cancelled", stage="cancelled", error="cancelled by operator"
         )
+        raise
+    except SearchResourceExceeded as e:
+        store.update_search(run_id, status="failed", stage="memory_budget", error=str(e))
+        (out_dir / "error.json").write_text(json.dumps({"error": str(e), "type": "memory_budget"}))
         raise
     except SearchInputError as e:
         store.update_search(run_id, status="failed", stage="input_error", error=str(e))
@@ -265,7 +287,7 @@ def _execute(
         status="abstained" if result.abstention.abstained else "succeeded",
         stage="finished",
         cpu_seconds=round(cpu, 1),
-        peak_rss_mb=round(rss, 1),
+        peak_rss_mb=round(max(rss, mem["peak"]), 1),
     )
     store.audit(
         "search.finished",

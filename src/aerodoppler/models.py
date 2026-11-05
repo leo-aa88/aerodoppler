@@ -156,11 +156,25 @@ class Recording(BaseModel):
     duration_s: float
     sample_rate_hz: int
     channels: int
+    # The analysis copy may be one interval of a longer source file. ``duration_s`` is the
+    # analysed interval; it starts ``segment_start_s`` seconds into the source. Event times are
+    # relative to the analysed interval; source time = event time + segment_start_s.
     source_duration_s: float | None = None
-    truncated: bool = False
+    truncated: bool = False  # the source has audio after the analysed interval
+    segment_start_s: float = 0.0
+    parent_recording_id: str | None = None  # set when this is another segment of a source
+    source_start_time_utc: str | None = None  # UTC at the first sample of the SOURCE file
+    # UTC at the first sample of the ANALYSED interval (= source start + segment_start_s)
     start_time_utc: str | None = None
     start_time_uncertainty_s: float | None = None
     recording_date_utc: str | None = None
+    # What the recording's time is based on, so nothing pretends to be more exact than it is:
+    # verified_start (UTC start known ± uncertainty), date_only (UTC day known),
+    # date_range (day between earliest and latest), upper_bound_only (e.g. a video's
+    # publication date: recorded on or before it), unknown.
+    time_basis: str = "unknown"
+    date_earliest_utc: str | None = None
+    date_latest_utc: str | None = None
     owner_permission_confirmed: bool = True
     created_at: str = Field(default_factory=utc_now_iso)
     synthetic: bool = False
@@ -189,6 +203,8 @@ class DopplerEvent(BaseModel):
         default=1, ge=1, description="harmonic number the ridge points belong to"
     )
     extra: dict[str, Any] = Field(default_factory=dict)
+    # computed when served by the API (search/events.assess_event); not part of the stored row
+    assessment: dict[str, Any] | None = Field(default=None, exclude=False)
 
     @field_validator("ridge_points")
     @classmethod
@@ -253,6 +269,9 @@ class SearchRequest(BaseModel):
     max_cpu_hours: float | None = 1.0
     quality_settings: QualitySettings = Field(default_factory=QualitySettings)
     seed: int = 0
+    # development overrides; never set by the default UI flow
+    allow_date_mismatch: bool = False
+    allow_synthetic_mix: bool = False
 
     @model_validator(mode="after")
     def _mode_requirements(self) -> SearchRequest:
