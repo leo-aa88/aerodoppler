@@ -91,7 +91,12 @@ def _spline_path(traj, lam: float = 100.0):
 
 
 def build_real_trajectory_scenario(
-    case: RealTrajectoryCase, dataset: FlightDataset, dem, out_dir: Path, c_mps: float | None = None
+    case: RealTrajectoryCase,
+    dataset: FlightDataset,
+    dem,
+    out_dir: Path,
+    c_mps: float | None = None,
+    local_bbox: BBox | None = None,
 ) -> dict[str, Any]:
     """Pick two real low-flying propeller aircraft passing near the observer, synthesise the
     recording from every audible real aircraft in the window, and write wav + truth."""
@@ -101,7 +106,11 @@ def build_real_trajectory_scenario(
     idx = FlightIndex([dataset])
     man = dataset.manifest()
     req_bbox = man["request"]["bbox"]
-    bbox = BBox(west=req_bbox[0], south=req_bbox[1], east=req_bbox[2], north=req_bbox[3])
+    # scenario construction only needs aircraft that could be heard (≤ audible_cpa_m); a local
+    # area keeps a continent-sized dataset tractable. This area is NOT given to any search.
+    bbox = local_bbox or BBox(
+        west=req_bbox[0], south=req_bbox[1], east=req_bbox[2], north=req_bbox[3]
+    )
     ground = float(dem.elevation([case.observer_lat], [case.observer_lon]).elevation_m[0])
     if not np.isfinite(ground):
         raise ValueError("DEM has no elevation at the observer")

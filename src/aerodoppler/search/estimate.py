@@ -52,21 +52,23 @@ def estimate_workload(settings: Settings, rec: Recording, req: SearchRequest) ->
     notes: list[str] = []
     if grid_points > q.max_candidates_coarse:
         notes.append(
-            f"{grid_points:,} grid points exceed the {q.max_candidates_coarse:,} cap: the grid is "
-            "thinned, so the search is coarser than requested"
+            f"{grid_points:,} grid points exceed the {q.max_candidates_coarse:,} limit: the search "
+            "will refuse to run; use a coarser grid or a smaller area"
         )
     if n_seg > q.max_segments:
         notes.append(
-            f"{n_seg:,} flight segments exceed the {q.max_segments:,} cap: only the longest are "
-            "kept, so the search is INCOMPLETE (aircraft can be missed); shrink the area or time"
+            f"{n_seg:,} flight segments exceed the {q.max_segments:,} the search holds in memory: "
+            "it will refuse to run; shrink the area or the time window"
         )
     if req.mode == SearchMode.UNKNOWN_TIME:
         notes.append(
             "unknown-time mode pairs every aircraft pass with every other one whose time "
             f"separation matches the events (± {q.event_separation_tolerance_s:.0f} s); work grows "
-            "roughly with the square of the number of segments"
+            "roughly with the square of the number of segments. Candidates are scored in order of "
+            f"physical consistency for up to {q.screen_budget_s / 60:.0f} min; if that budget runs "
+            "out the result says how much was scored and is marked not exhaustive"
         )
-    feasible = n_seg <= q.max_segments and grid_points <= 4 * q.max_candidates_coarse
+    feasible = n_seg <= q.max_segments and grid_points <= q.max_candidates_coarse
     return {
         "datasets": ds_ids,
         "dataset_warnings": warnings,

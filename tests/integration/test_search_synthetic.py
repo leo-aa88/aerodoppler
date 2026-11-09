@@ -285,3 +285,31 @@ def test_search_without_datasets_uses_only_date_compatible_ones(world):
         SearchInputError, match="no imported SYNTHETIC flight archive covers 2020-01-01"
     ):
         run_search_inline(w["store"], w["settings"], req)
+
+
+def test_anytime_screen_reports_partial_coverage(world):
+    """With a screen budget that runs out, the search scores candidates most-consistent first,
+    says how many it scored, and is marked not exhaustive (never silently complete)."""
+    w = world
+    q = QualitySettings(workers=2, ultra_keep_top=200, screen_batch=500, screen_budget_s=0.0)
+    req = SearchRequest(
+        mode=SearchMode.UNKNOWN_TIME,
+        recording_id=w["rec"].id,
+        event_ids=[e.id for e in w["events"][:2]],
+        date_utc=w["spec"].date_utc,
+        bbox=w["spec"].bbox,
+        flight_dataset_ids=[w["sc"].dataset.dataset_id],
+        quality_settings=q,
+    )
+    res = run_search_inline(w["store"], w["settings"], req)
+    gate = (
+        next(g for g in res.gates if g["name"] == "search_complete")
+        if isinstance(res.gates[0], dict)
+        else next(g for g in res.gates if g.name == "search_complete")
+    )
+    detail = gate["detail"] if isinstance(gate, dict) else gate.detail
+    passed = gate["passed"] if isinstance(gate, dict) else gate.passed
+    assert not passed and "NOT exhaustive" in detail and "of " in detail
+    screen = next(c for c in res.stage_counters if c.stage == "ultra_coarse_screen")
+    assert screen.candidates_in > 500 and "stopped by the 0 s budget" in screen.note
+    assert res.confidence_grade != "high"

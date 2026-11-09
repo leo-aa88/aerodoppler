@@ -451,17 +451,22 @@ class SearchEngine:
             v_bounds=[v_min, v_max],
             slant_bounds=[d_min, d_max],
         )
-        segments = load_segments(
-            index,
-            t_min,
-            t_max,
-            bbox.expanded_km(self.settings.adsb_bbox_margin_km),
-            v_min,
-            v_max,
-            q.max_segments,
-            self.counters,
-            self.warnings,
-        )
+        from aerodoppler.search.preselect import TooManySegments
+
+        try:
+            segments = load_segments(
+                index,
+                t_min,
+                t_max,
+                bbox.expanded_km(self.settings.adsb_bbox_margin_km),
+                v_min,
+                v_max,
+                q.max_segments,
+                self.counters,
+                self.warnings,
+            )
+        except TooManySegments as e:
+            raise SearchInputError(str(e)) from e
         self._stage("segments_loaded", n=len(segments))
         if not segments:
             return self._finish(
@@ -497,7 +502,7 @@ class SearchEngine:
         self._stage("cpa_computed", entries=int(len(sp.tau)))
         if req.mode == SearchMode.UNKNOWN_TIME:
             delta_t = feats[1].t_center_s - feats[0].t_center_s
-            assignments = mode_a_pairs(
+            pool = mode_a_pairs(
                 sp,
                 segments,
                 feats,
@@ -509,7 +514,7 @@ class SearchEngine:
                 c_mps=c.c_mps,
             )
         else:
-            assignments = mode_b_matches(
+            pool = mode_b_matches(
                 sp,
                 segments,
                 feats,
@@ -519,19 +524,23 @@ class SearchEngine:
                 self.counters,
                 q.max_assignments,
                 self.warnings,
+                c_mps=c.c_mps,
             )
-        if req.mode == SearchMode.UNKNOWN_TIME and len(feats) > 2 and assignments:
-            n_unexpl = attach_extra_events(assignments, sp, feats, q.event_separation_tolerance_s)
-            self.counters.append(
-                StageCounter(
-                    stage="extra_events_attached",
-                    candidates_in=len(assignments),
-                    candidates_out=len(assignments),
-                    note=f"{len(feats) - 2} additional event(s) explained by the flight whose delayed CPA matches t0 + centre (± tol); {n_unexpl} event slots left unexplained",
-                )
-            )
-        self._stage("candidates_generated", n=len(assignments))
-        if not assignments:
+        extra_events = req.mode == SearchMode.UNKNOWN_TIME and len(feats) > 2
+        n_unexpl = 0
+        assignments: list[Assignment] = []  # materialised in prior order as they are scored
+
+        def materialise(a: int, b: int) -> list[int]:
+            nonlocal n_unexpl
+            objs = pool.take(a, b)
+            if extra_events and objs:
+                n_unexpl += attach_extra_events(objs, sp, feats, q.event_separation_tolerance_s)
+            base = len(assignments)
+            assignments.extend(objs)
+            return list(range(base, base + len(objs)))
+
+        self._stage("candidates_generated", n=len(pool))
+        if len(pool) == 0:
             return self._finish(
                 req,
                 run_id,
@@ -598,33 +607,87 @@ class SearchEngine:
             f0_polish_step_fraction=0.0,
         )
         ctx.ultra_step_s = q.ultra_t0_step_s
-        coarse_idx = list(range(len(assignments)))
-        if len(assignments) > q.ultra_keep_top:
+        n_pool = len(pool)
+        if n_pool <= q.ultra_keep_top:
+            coarse_idx = materialise(0, n_pool)
+            self._completeness["ultra"] = {
+                "scheduled": n_pool,
+                "scored": n_pool,
+                "kept": n_pool,
+                "stopped_by": "complete",
+                "best_discarded": None,
+                "best_kept": None,
+            }
+        else:
+            # anytime screen: score the pool in consistency-prior order, batch by batch, until
+            # everything is scored or the time budget is spent; keep the best ultra_keep_top
             t_u = time.perf_counter()
-            ultra_results = self._parallel_scores(
-                ctx, coarse_idx, coarse=True, workers=q.workers, ultra=True
-            )
-            ultra_scores = np.array([r.combined if r is not None else -9.0 for r in ultra_results])
+            n_workers = q.workers or max(1, mp.cpu_count() - 1)
+            batch = q.screen_batch or max(20_000, 4000 * n_workers)
+            scores_all: list[float] = []
+            batch_best: list[float] = []
+            done = 0
+            stopped_by = "complete"
+            while done < n_pool:
+                self._check_cancel()
+                idx = materialise(done, done + batch)
+                res = self._parallel_scores(ctx, idx, coarse=True, workers=q.workers, ultra=True)
+                sc = [res[i].combined if res[i] is not None else -9.0 for i in idx]
+                scores_all.extend(sc)
+                batch_best.append(float(max(sc)) if sc else -9.0)
+                done += len(idx)
+                self._stage("ultra_coarse_progress", done=done, total=n_pool)
+                if done < n_pool and time.perf_counter() - t_u > q.screen_budget_s:
+                    stopped_by = "budget"
+                    break
+            ultra_scores = np.array(scores_all)
             order_u = np.argsort(-ultra_scores)
             coarse_idx = [int(i) for i in order_u[: q.ultra_keep_top] if ultra_scores[i] > -5]
             dropped_u = order_u[q.ultra_keep_top :]
+            elapsed_u = time.perf_counter() - t_u
             self._completeness["ultra"] = {
-                "scheduled": int(len(assignments)),
+                "scheduled": int(n_pool),
+                "scored": int(done),
                 "kept": int(len(coarse_idx)),
+                "stopped_by": stopped_by,
+                "budget_s": float(q.screen_budget_s),
+                "elapsed_s": round(elapsed_u, 1),
                 "best_discarded": float(ultra_scores[dropped_u].max()) if len(dropped_u) else None,
                 "best_kept": float(ultra_scores[order_u[0]]),
+                "best_in_last_batch": batch_best[-1],
+                "prior_first_unscored": float(pool.cost[done]) if done < n_pool else None,
+                "prior_last_scored": float(pool.cost[done - 1]) if done else None,
             }
+            cov = f"{done} of {n_pool} candidates ({100.0 * done / n_pool:.0f} %)"
             self.counters.append(
                 StageCounter(
                     stage="ultra_coarse_screen",
-                    candidates_in=len(assignments),
+                    candidates_in=int(n_pool),
                     candidates_out=len(coarse_idx),
-                    note=f"all pairs scored with 2 harmonics, 3 f0 values, t0 step {q.ultra_t0_step_s}s, <=150 curve samples; top {q.ultra_keep_top} kept",
-                    elapsed_s=round(time.perf_counter() - t_u, 2),
+                    note=(
+                        f"anytime screen in consistency-prior order: {cov} scored in "
+                        f"{elapsed_u:.0f} s ({'stopped by the ' + str(int(q.screen_budget_s)) + ' s budget' if stopped_by == 'budget' else 'complete'}); "
+                        f"2 harmonics, t0 step {q.ultra_t0_step_s}s; top {q.ultra_keep_top} kept"
+                    ),
+                    elapsed_s=round(elapsed_u, 2),
                 )
             )
             self._stage(
-                "ultra_coarse_screened", kept=len(coarse_idx), best=float(np.max(ultra_scores))
+                "ultra_coarse_screened",
+                kept=len(coarse_idx),
+                best=float(np.max(ultra_scores)),
+                scored=done,
+                total=n_pool,
+                stopped_by=stopped_by,
+            )
+        if extra_events:
+            self.counters.append(
+                StageCounter(
+                    stage="extra_events_attached",
+                    candidates_in=len(assignments),
+                    candidates_out=len(assignments),
+                    note=f"{len(feats) - 2} additional event(s) explained by the flight whose delayed CPA matches t0 + centre (± tol); {n_unexpl} event slots left unexplained",
+                )
             )
         # ---- coarse scoring -------------------------------------------------------------
         t_c = time.perf_counter()
@@ -953,13 +1016,23 @@ class SearchEngine:
     def _completeness_gate(self) -> tuple[bool, str]:
         """The funnel must not have discarded a competitor comparable to the winner."""
         notes, ok = [], True
+        u = self._completeness.get("ultra") or {}
+        if u.get("stopped_by") == "budget":
+            ok = False
+            notes.append(
+                f"NOT exhaustive: the screen scored {u['scored']} of {u['scheduled']} candidates "
+                f"({100.0 * u['scored'] / max(u['scheduled'], 1):.0f} %) in consistency-prior order "
+                f"before its {u['budget_s']:.0f} s budget ran out; the rest were never scored "
+                f"(best score in the last batch {u['best_in_last_batch']:.2f} vs best overall "
+                f"{u['best_kept']:.2f}{' — still finding strong candidates' if u['best_in_last_batch'] >= u['best_kept'] - 0.5 else ''})"
+            )
         for stage in ("ultra", "coarse"):
             c = self._completeness.get(stage)
-            if not c:
+            if not c or c.get("best_kept") is None:
                 continue
             bd, bk = c.get("best_discarded"), c.get("best_kept")
             notes.append(
-                f"{stage}: {c['kept']}/{c['scheduled']} kept, best discarded {bd if bd is None else round(bd, 2)} vs best kept {bk if bk is None else round(bk, 2)}"
+                f"{stage}: {c['kept']}/{c.get('scored', c['scheduled'])} kept, best discarded {bd if bd is None else round(bd, 2)} vs best kept {bk if bk is None else round(bk, 2)}"
             )
             if bd is not None and bk is not None and bd >= bk - 0.25:
                 ok = False

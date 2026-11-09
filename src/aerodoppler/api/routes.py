@@ -760,6 +760,35 @@ def create_search(body: S.SearchCreateRequest, request: Request) -> S.SearchStat
     return _search_view(job)
 
 
+@router.post("/api/searches/blind", status_code=202)
+def create_blind_search(body: S.BlindSearchRequest, request: Request) -> dict[str, Any]:
+    """Queue a ``blind_search`` job: no area; the search scope is the extent of the imported
+    flight data of the day, reported in the result. Progress and result: ``/api/jobs/{id}``."""
+    from aerodoppler.api.jobs_routes import job_view
+    from aerodoppler.jobs.service import JobRejected, submit_job
+
+    settings: Settings = request.app.state.settings
+    store: Store = request.app.state.store
+    if body.mode == SearchMode.UNKNOWN_TIME and (not body.date_utc or len(body.event_ids) < 2):
+        raise api_error(
+            422, "invalid_request", "an unknown-time blind search needs the UTC day and two events"
+        )
+    if body.mode == SearchMode.KNOWN_TIME and not body.start_utc:
+        raise api_error(422, "invalid_request", "a known-time blind search needs the UTC start")
+    if store.get_recording(body.recording_id) is None:
+        raise api_error(404, "not_found", "recording not found")
+    for e in body.event_ids:
+        if store.get_event(e) is None:
+            raise api_error(404, "not_found", f"event {e} not found")
+    params = body.model_dump(mode="json")
+    params["config"] = {"budget_s": params.pop("budget_s")}
+    try:
+        job, _ = submit_job(settings, "blind_search", params, queue=request.app.state.queue)
+    except JobRejected as e:
+        raise api_error(422, e.code, str(e)) from e
+    return job_view(job)
+
+
 def _search_job(request: Request, run_id: str) -> Any:
     j = request.app.state.queue.get(_safe_id(run_id, "search"))
     if j is None or j.type != "geolocation_search":
