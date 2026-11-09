@@ -498,7 +498,17 @@ class SearchEngine:
         self._stage(
             "grid_built", n_points=len(grid.grid), dem=grid.dem_source, dem_flags=grid.dem_flags
         )
-        sp = sparse_cpa(segments, grid, c.c_mps, d_min, d_max, self.counters)
+        sp = sparse_cpa(
+            segments,
+            grid,
+            c.c_mps,
+            d_min,
+            d_max,
+            self.counters,
+            event_bounds=[
+                (f.v_min_mps, f.v_max_mps, f.d_min_m, min(f.d_max_m, d_max)) for f in feats
+            ],
+        )
         self._stage("cpa_computed", entries=int(len(sp.tau)))
         if req.mode == SearchMode.UNKNOWN_TIME:
             delta_t = feats[1].t_center_s - feats[0].t_center_s
@@ -628,21 +638,78 @@ class SearchEngine:
             batch_best: list[float] = []
             done = 0
             stopped_by = "complete"
+            alive = np.empty(0, dtype=np.int64)  # materialised objects that may still be kept
+            # batched scorer (numba threads over shared arrays, no per-candidate objects);
+            # multi-event hypotheses (extra events attached per candidate) use the reference
+            use_batch = q.batched_screen and not extra_events
+            if use_batch:
+                import numba
+
+                from aerodoppler.search.batch import UltraBatchScorer
+
+                scorer = UltraBatchScorer(ctx, ctx.ultra_cfg)
+                offsets = _t0_candidates(ctx, 0.0, True, True)
+                numba.set_num_threads(max(1, min(n_workers, numba.config.NUMBA_NUM_THREADS)))
             while done < n_pool:
                 self._check_cancel()
+                if use_batch:
+                    sl = slice(done, min(done + batch, n_pool))
+                    n_b = sl.stop - sl.start
+                    t0c = (
+                        pool.t0_center[sl]
+                        if ctx.mode == SearchMode.UNKNOWN_TIME
+                        else np.full(n_b, float(ctx.t0_known))
+                    )
+                    sc = scorer.score(
+                        grid.observer_ecef[pool.point_idx[sl]],
+                        pool.seg[sl],
+                        pool.tau[sl],
+                        t0c,
+                        offsets,
+                        UNEXPLAINED_EVENT_SCORE,
+                    ).tolist()
+                    scores_all.extend(sc)
+                    batch_best.append(float(max(sc)) if sc else -9.0)
+                    done += n_b
+                    self._stage("ultra_coarse_progress", done=done, total=n_pool)
+                    if done < n_pool and time.perf_counter() - t_u > q.screen_budget_s:
+                        stopped_by = "budget"
+                        break
+                    continue
                 idx = materialise(done, done + batch)
                 res = self._parallel_scores(ctx, idx, coarse=True, workers=q.workers, ultra=True)
                 sc = [res[i].combined if res[i] is not None else -9.0 for i in idx]
+                del res
                 scores_all.extend(sc)
                 batch_best.append(float(max(sc)) if sc else -9.0)
                 done += len(idx)
+                # release the objects of candidates that can no longer reach the kept top: only
+                # the current top ultra_keep_top is ever used again (memory: 3.9 M scored
+                # candidates held as objects took several GB on the Manhattan workload)
+                alive = np.concatenate([alive, np.asarray(idx, dtype=np.int64)])
+                if len(alive) > 2 * q.ultra_keep_top:
+                    sc_alive = np.asarray(scores_all)[alive]
+                    # same total order as the final selection below: score, then prior order
+                    top = np.lexsort((alive, -sc_alive))[: q.ultra_keep_top]
+                    keep_mask = np.zeros(len(alive), dtype=bool)
+                    keep_mask[top] = True
+                    for i in alive[~keep_mask]:
+                        assignments[int(i)] = None  # type: ignore[call-overload]
+                    alive = alive[keep_mask]
                 self._stage("ultra_coarse_progress", done=done, total=n_pool)
                 if done < n_pool and time.perf_counter() - t_u > q.screen_budget_s:
                     stopped_by = "budget"
                     break
             ultra_scores = np.array(scores_all)
-            order_u = np.argsort(-ultra_scores)
+            order_u = np.lexsort((np.arange(len(ultra_scores)), -ultra_scores))
             coarse_idx = [int(i) for i in order_u[: q.ultra_keep_top] if ultra_scores[i] > -5]
+            if use_batch:
+                # materialise only the kept candidates, in pool order, so labels keep the
+                # reference path's relative order
+                kept_pos = np.sort(np.asarray(coarse_idx, dtype=np.int64))
+                base = len(assignments)
+                assignments.extend(pool.take_indices(kept_pos))
+                coarse_idx = list(range(base, base + len(kept_pos)))
             dropped_u = order_u[q.ultra_keep_top :]
             elapsed_u = time.perf_counter() - t_u
             self._completeness["ultra"] = {
@@ -705,7 +772,7 @@ class SearchEngine:
         self._stage(
             "coarse_scored", best=float(np.nanmax(coarse_scores)) if len(coarse_scores) else None
         )
-        order_c = np.argsort(-coarse_scores)
+        order_c = np.lexsort((np.arange(len(coarse_scores)), -coarse_scores))
         keep = [int(i) for i in order_c[: q.coarse_keep_top] if coarse_scores[i] > -5]
         dropped_c = order_c[q.coarse_keep_top :]
         finite_dropped = coarse_scores[dropped_c] if len(dropped_c) else np.array([])

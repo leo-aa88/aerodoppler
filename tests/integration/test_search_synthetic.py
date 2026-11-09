@@ -313,3 +313,65 @@ def test_anytime_screen_reports_partial_coverage(world):
     screen = next(c for c in res.stage_counters if c.stage == "ultra_coarse_screen")
     assert screen.candidates_in > 500 and "stopped by the 0 s budget" in screen.note
     assert res.confidence_grade != "high"
+
+
+@pytest.mark.parametrize("batched", [True, False])
+def test_screen_releases_unkept_candidates_and_still_finds_the_answer(world, batched):
+    """Many small screen batches with a small kept top, with the batched scorer and with the
+    reference path (which releases candidates that fall out of the top as it goes): the kept
+    top is still the right one."""
+    w = world
+    truth = w["sc"].truth
+    q = QualitySettings(
+        workers=2,
+        ultra_keep_top=100,
+        screen_batch=300,
+        screen_budget_s=3600.0,
+        batched_screen=batched,
+    )
+    req = SearchRequest(
+        mode=SearchMode.UNKNOWN_TIME,
+        recording_id=w["rec"].id,
+        event_ids=[w["events"][0].id, w["events"][1].id],
+        date_utc=w["spec"].date_utc,
+        bbox=w["spec"].bbox,
+        flight_dataset_ids=[w["sc"].dataset.dataset_id],
+        quality_settings=q,
+    )
+    res = run_search_inline(w["store"], w["settings"], req)
+    screen = next(c for c in res.stage_counters if c.stage == "ultra_coarse_screen")
+    assert screen.candidates_in > 3 * 300 and "(complete)" in screen.note
+    assert screen.candidates_out <= 100
+    best = res.candidates[0]
+    assert _err(best, truth) < 300.0
+    assert {s["icao24"] for s in best.extra["segments"]} == {
+        truth["event_a"]["icao24"],
+        truth["event_b"]["icao24"],
+    }
+
+
+def test_batched_and_reference_screens_give_the_same_search(world):
+    """End to end: the batched screen is an optimisation; with the same request the search keeps
+    the same candidates and returns the same answer as the reference path."""
+    w = world
+    out = {}
+    for batched in (True, False):
+        q = QualitySettings(workers=2, ultra_keep_top=150, screen_batch=400, batched_screen=batched)
+        req = SearchRequest(
+            mode=SearchMode.UNKNOWN_TIME,
+            recording_id=w["rec"].id,
+            event_ids=[w["events"][0].id, w["events"][1].id],
+            date_utc=w["spec"].date_utc,
+            bbox=w["spec"].bbox,
+            flight_dataset_ids=[w["sc"].dataset.dataset_id],
+            quality_settings=q,
+        )
+        res = run_search_inline(w["store"], w["settings"], req)
+        screen = next(c for c in res.stage_counters if c.stage == "ultra_coarse_screen")
+        out[batched] = (
+            [(round(c.lat, 7), round(c.lon, 7), round(c.score_total, 6)) for c in res.candidates],
+            screen.candidates_in,
+            screen.candidates_out,
+            res.confidence_grade,
+        )
+    assert out[True] == out[False]

@@ -1,0 +1,1152 @@
+{
+ "workloads": {
+  "W1": {
+   "wall_s": 531.0,
+   "summary": {
+    "label": "SYNTHETIC BENCHMARK \u2014 measures the inverse engine on simulated audio/flights; NOT real-world accuracy",
+    "aerodoppler_version": "0.1.0",
+    "git_sha": "1919da5e974a75855e168ad833a1bba5585afd04",
+    "n_cases": 2,
+    "mode_a": {
+     "n_cases": 2,
+     "n_answered": 2,
+     "n_abstained": 0,
+     "abstention_rate": 0.0,
+     "abstention_reasons": {},
+     "top1_error_m": {
+      "median": 34.18710759702474,
+      "p90": 36.56041900406993,
+      "max": 37.15374685583122,
+      "values": [
+       31.2,
+       37.2
+      ]
+     },
+     "top3_min_error_m": {
+      "median": 34.18710759702474,
+      "p90": 36.56041900406993
+     },
+     "success_rate_top1_within_300m": 1.0,
+     "success_rate_top3_within_300m": 1.0,
+     "false_match_rate_top1_over_1km": 0.0,
+     "flights_correct_rate": 1.0,
+     "runtime_s": {
+      "median": 158.14877378940582,
+      "max": 176.76355481147766
+     },
+     "calibration_note": "scores are relative, uncalibrated fit values; no confidence intervals are claimed"
+    },
+    "mode_b": {
+     "n_cases": 2,
+     "n_answered": 2,
+     "n_abstained": 0,
+     "abstention_rate": 0.0,
+     "abstention_reasons": {},
+     "top1_error_m": {
+      "median": 21.42593451161806,
+      "p90": 21.42593451161806,
+      "max": 21.42593451161806,
+      "values": [
+       21.4,
+       21.4
+      ]
+     },
+     "top3_min_error_m": {
+      "median": 21.42593451161806,
+      "p90": 21.42593451161806
+     },
+     "success_rate_top1_within_300m": 1.0,
+     "success_rate_top3_within_300m": 1.0,
+     "false_match_rate_top1_over_1km": 0.0,
+     "flights_correct_rate": 1.0,
+     "runtime_s": {
+      "median": 78.19041180610657,
+      "max": 79.8435595035553
+     },
+     "calibration_note": "scores are relative, uncalibrated fit values; no confidence intervals are claimed"
+    }
+   }
+  },
+  "W2": {
+   "wall_s": 1018.2,
+   "summary": {
+    "label": "SEMI-SYNTHETIC BENCHMARK \u2014 real ADS-B trajectories + real DEM, SIMULATED audio; not real-world accuracy",
+    "dataset_id": "adsblol_2026-11-02_1e2f2f08",
+    "aerodoppler_version": "0.1.0",
+    "git_sha": "1919da5e974a75855e168ad833a1bba5585afd04",
+    "summary": {
+     "n_cases": 2,
+     "n_answered": 2,
+     "n_abstained": 0,
+     "abstention_rate": 0.0,
+     "abstention_reasons": {},
+     "top1_error_m": {
+      "median": 6043.519074187509,
+      "p90": 10867.578606048204,
+      "max": 12073.593489013378,
+      "values": [
+       12073.6,
+       13.4
+      ]
+     },
+     "top3_min_error_m": {
+      "median": 5208.176957310768,
+      "p90": 9363.96279567007
+     },
+     "success_rate_top1_within_300m": 0.5,
+     "success_rate_top3_within_300m": 0.5,
+     "false_match_rate_top1_over_1km": 0.5,
+     "flights_correct_rate": null,
+     "runtime_s": {
+      "median": 468.3549174070358,
+      "max": 525.1960504055023
+     },
+     "calibration_note": "scores are relative, uncalibrated fit values; no confidence intervals are claimed"
+    },
+    "summary_oracle_events": null
+   }
+  },
+  "W4": {
+   "wall_s": 223.5,
+   "summary": {
+    "label": "REAL RECORDINGS (Pathak Livermore set, CC BY 4.0) \u2014 truth = trilaterated recorder (not surveyed); audio start derived from the published ridge; events detected blind; known-time mode \u00b12 s; 4 km box offset from the recorder",
+    "zenodo": "23424278",
+    "aerodoppler_version": "0.1.0",
+    "git_sha": "1919da5e974a75855e168ad833a1bba5585afd04",
+    "trilateration": {
+     "lat": 37.663202075359926,
+     "lon": -121.78186821134538,
+     "east_m": -1047.163522914938,
+     "north_m": -1864.3398980659642,
+     "n_tracks": 37,
+     "rms_m": 0.057515236452573316,
+     "median_abs_m": 0.02329885711787938,
+     "residuals_m": {
+      "N86LP_R01": -0.008056335393462177,
+      "N9393T_R02": -0.03372178792437808,
+      "N788BM_R03": 0.02141601437722329,
+      "N784MB_R04": -0.011090258541685216,
+      "N413AK_R05": -0.02911050915344049,
+      "N373DF_R06": 0.07663808861130406,
+      "N814SR_R07": 0.04171174178634374,
+      "N60RS_R11": 0.005883655142497446,
+      "N4040_R12": -0.027394015749678147,
+      "N795MM_R13": -0.0016844149486132665,
+      "N248LF_R14": 0.16509377774991663,
+      "N913TC_R15": 0.009920236306243169,
+      "N413AK_R16": -0.020053872488347224,
+      "N500MG_R17": 0.01318086338925184,
+      "N621KS_R18": -0.02420232000008582,
+      "N4004R_R19": -0.019624536077117227,
+      "N394FX_R20": -0.005821978956703333,
+      "N563FX_R21": -0.024447735738476695,
+      "N916KT_R22": 0.026328687903969694,
+      "N310MG_R23": 0.02329885711787938,
+      "N9658K_R24": 0.025634453570773985,
+      "N8085W_R27": -0.030518911349989963,
+      "N7RR_R30": 0.056338036921715684,
+      "N172EL_R35": 0.020883686809042956,
+      "N748SP_R36": -0.02066494357177362,
+      "N61NG_R37": -0.011603978572793494,
+      "N456CS_R38": 0.06858190120556173,
+      "N3012N_R40": 0.0918342359802864,
+      "N757AH_R41": -0.015405901180656656,
+      "N759NC_R46": 0.03129828949772673,
+      "N662EZ_R48": 0.01882585369548906,
+      "N413AK_R49": 0.21851672585489723,
+      "N958JX_R50": 0.07217335548585879,
+      "N451EE_R51": 0.015028624396734358,
+      "N231DT_R57": 0.07953920913132606,
+      "N67WL_R59": 0.010461290218700015,
+      "N7PG_R60": -0.02249559520441835
+     },
+     "outliers_m": {
+      "N2933A_R08": 3364.9518250772567,
+      "N1387U_R44": 1494.4214239204953,
+      "N451EE_R45": 4727.407242271992
+     },
+     "method": "robust least squares on |dist(recorder, ground track) - L_ADSB_m|; second pass without passages with |residual| >= 150 m (recorded elsewhere)"
+    },
+    "datasets": [
+     "adsblol_2026-05-17_c432e6e8",
+     "adsblol_2026-05-16_c432e6e8"
+    ],
+    "summary": {
+     "n_cases": 29,
+     "n_answered": 18,
+     "n_abstained": 11,
+     "abstention_rate": 0.3793103448275862,
+     "abstention_reasons": {
+      "weak_fit": 11
+     },
+     "top1_error_m": {
+      "median": 390.5155191645914,
+      "p90": 4392.4036865679045,
+      "max": 6746.081289221,
+      "values": [
+       1500.3,
+       3126.5,
+       153.3,
+       84.6,
+       6733.2,
+       465.6,
+       81.5,
+       6746.1,
+       167.5,
+       2121.2,
+       1060.8,
+       67.4,
+       3389.2,
+       115.3,
+       499.2,
+       229.2,
+       181.5,
+       315.4
+      ]
+     },
+     "top3_min_error_m": {
+      "median": 178.72556683941463,
+      "p90": 2186.8383470329404
+     },
+     "success_rate_top1_within_300m": 0.4444444444444444,
+     "success_rate_top3_within_300m": 0.6666666666666666,
+     "false_match_rate_top1_over_1km": 0.3888888888888889,
+     "flights_correct_rate": 0.8333333333333334,
+     "runtime_s": {
+      "median": 8.350557327270508,
+      "max": 11.594299554824829
+     },
+     "calibration_note": "scores are relative, uncalibrated fit values; no confidence intervals are claimed"
+    }
+   }
+  }
+ },
+ "searches": [
+  {
+   "workload": "W1",
+   "job_id": "job_a1d043742d85",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 79.8,
+   "peak_tree_pss_mb": 1080.9,
+   "cpu_s": 318.5,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.009,
+    "trajectories_built": 0.042,
+    "grid_points": 0.033,
+    "cpa_within_slant_bounds": 0.101,
+    "mode_b_matches": 0.009,
+    "coarse_scoring": 5.25,
+    "fine_scoring": 11.48,
+    "refinement": 16.39
+   },
+   "screen": null,
+   "top1": {
+    "lat": 39.999947102153264,
+    "lon": -74.99975812815555
+   },
+   "abstained": false,
+   "grade": "high"
+  },
+  {
+   "workload": "W1",
+   "job_id": "job_30554b4af4ac",
+   "status": "succeeded",
+   "mode": "unknown-time",
+   "wall_s": 176.8,
+   "peak_tree_pss_mb": 1178.8,
+   "cpu_s": 270.2,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.009,
+    "trajectories_built": 0.043,
+    "grid_points": 0.034,
+    "cpa_within_slant_bounds": 0.109,
+    "event_bounds_filter": 0.001,
+    "mode_a_pairs": 0.017,
+    "coarse_scoring": 58.45,
+    "fine_scoring": 18.41,
+    "refinement": 26.48
+   },
+   "screen": null,
+   "top1": {
+    "lat": 39.99972194717112,
+    "lon": -74.99975812894995
+   },
+   "abstained": false,
+   "grade": "high"
+  },
+  {
+   "workload": "W1",
+   "job_id": "job_9fa585da9c7c",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 76.5,
+   "peak_tree_pss_mb": 1025.2,
+   "cpu_s": 162.7,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.01,
+    "trajectories_built": 0.03,
+    "grid_points": 0.031,
+    "cpa_within_slant_bounds": 0.052,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 2.47,
+    "fine_scoring": 11.24,
+    "refinement": 17.01
+   },
+   "screen": null,
+   "top1": {
+    "lat": 39.999947102153264,
+    "lon": -74.99975812815555
+   },
+   "abstained": false,
+   "grade": "high"
+  },
+  {
+   "workload": "W1",
+   "job_id": "job_b20ef897d63f",
+   "status": "succeeded",
+   "mode": "unknown-time",
+   "wall_s": 139.5,
+   "peak_tree_pss_mb": 1682.5,
+   "cpu_s": 115.2,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.039,
+    "trajectories_built": 0.039,
+    "grid_points": 0.036,
+    "cpa_within_slant_bounds": 0.052,
+    "event_bounds_filter": 0.0,
+    "mode_a_pairs": 0.01,
+    "coarse_scoring": 15.57,
+    "fine_scoring": 19.44,
+    "refinement": 28.33
+   },
+   "screen": null,
+   "top1": {
+    "lat": 39.999721947412326,
+    "lon": -75.0000508888684
+   },
+   "abstained": false,
+   "grade": "high"
+  },
+  {
+   "workload": "W2",
+   "job_id": "job_c60ba6e83799",
+   "status": "succeeded",
+   "mode": "unknown-time",
+   "wall_s": 525.1,
+   "peak_tree_pss_mb": 3740.2,
+   "cpu_s": 664.3,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.014,
+    "trajectories_built": 5.031,
+    "grid_points": 0.041,
+    "cpa_within_slant_bounds": 7.432,
+    "event_bounds_filter": 0.06,
+    "mode_a_pairs": 1.015,
+    "ultra_coarse_screen": 261.47,
+    "coarse_scoring": 153.55,
+    "fine_scoring": 7.89,
+    "refinement": 12.8
+   },
+   "screen": {
+    "scored": 496940,
+    "total": 496940,
+    "seconds": 261.0,
+    "per_s": 1904.0
+   },
+   "top1": {
+    "lat": 29.199889737517037,
+    "lon": -81.15005683664901
+   },
+   "abstained": false,
+   "grade": "low"
+  },
+  {
+   "workload": "W2",
+   "job_id": "job_63cfffcbe1c7",
+   "status": "succeeded",
+   "mode": "unknown-time",
+   "wall_s": 411.5,
+   "peak_tree_pss_mb": 3601.0,
+   "cpu_s": 460.6,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.015,
+    "trajectories_built": 7.492,
+    "grid_points": 0.069,
+    "cpa_within_slant_bounds": 9.872,
+    "event_bounds_filter": 0.064,
+    "mode_a_pairs": 1.061,
+    "ultra_coarse_screen": 236.62,
+    "coarse_scoring": 149.02,
+    "fine_scoring": 1.1,
+    "refinement": 2.19
+   },
+   "screen": {
+    "scored": 423404,
+    "total": 423404,
+    "seconds": 237.0,
+    "per_s": 1786.5
+   },
+   "top1": {
+    "lat": 28.970080035595036,
+    "lon": -81.14646940317648
+   },
+   "abstained": false,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_e16fb4a063cc",
+   "status": "abstained",
+   "mode": "known-time",
+   "wall_s": 3.8,
+   "peak_tree_pss_mb": 1576.2,
+   "cpu_s": 862.5,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.034,
+    "trajectories_built": 0.323,
+    "grid_points": 0.021,
+    "cpa_within_slant_bounds": 0.038,
+    "mode_b_matches": 0.001,
+    "coarse_scoring": 0.49,
+    "fine_scoring": 0.62,
+    "refinement": 1.88
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.66418836192361,
+    "lon": -121.78295439478633
+   },
+   "abstained": true,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_38ebae335ca9",
+   "status": "abstained",
+   "mode": "known-time",
+   "wall_s": 4.3,
+   "peak_tree_pss_mb": 1561.2,
+   "cpu_s": 858.0,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.027,
+    "trajectories_built": 0.332,
+    "grid_points": 0.012,
+    "cpa_within_slant_bounds": 0.042,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.64,
+    "fine_scoring": 0.69,
+    "refinement": 2.26
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.641076044981396,
+    "lon": -121.77794417412076
+   },
+   "abstained": true,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_a1097f9634d6",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 8.5,
+   "peak_tree_pss_mb": 1688.4,
+   "cpu_s": 853.8,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.021,
+    "trajectories_built": 0.392,
+    "grid_points": 0.008,
+    "cpa_within_slant_bounds": 0.045,
+    "mode_b_matches": 0.001,
+    "coarse_scoring": 0.62,
+    "fine_scoring": 1.04,
+    "refinement": 2.37
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.66425445915743,
+    "lon": -121.77854053481224
+   },
+   "abstained": false,
+   "grade": "medium"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_7997a3beeac0",
+   "status": "abstained",
+   "mode": "known-time",
+   "wall_s": 4.7,
+   "peak_tree_pss_mb": 1582.6,
+   "cpu_s": 845.4,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.024,
+    "trajectories_built": 0.438,
+    "grid_points": 0.009,
+    "cpa_within_slant_bounds": 0.05,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.75,
+    "fine_scoring": 0.79,
+    "refinement": 2.26
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.66367506580389,
+    "lon": -121.78272697380844
+   },
+   "abstained": true,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_34a279c76fcd",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 6.7,
+   "peak_tree_pss_mb": 1710.6,
+   "cpu_s": 840.2,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.025,
+    "trajectories_built": 0.461,
+    "grid_points": 0.005,
+    "cpa_within_slant_bounds": 0.054,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.71,
+    "fine_scoring": 0.8,
+    "refinement": 2.17
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.6641588079648,
+    "lon": -121.78019813951964
+   },
+   "abstained": false,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_582ff97f0188",
+   "status": "abstained",
+   "mode": "known-time",
+   "wall_s": 5.4,
+   "peak_tree_pss_mb": 1783.3,
+   "cpu_s": 832.5,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.026,
+    "trajectories_built": 0.476,
+    "grid_points": 0.011,
+    "cpa_within_slant_bounds": 0.048,
+    "mode_b_matches": 0.001,
+    "coarse_scoring": 0.69,
+    "fine_scoring": 1.14,
+    "refinement": 2.64
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.653199453999775,
+    "lon": -121.77114125544354
+   },
+   "abstained": true,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_624db828e8b7",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 8.1,
+   "peak_tree_pss_mb": 1671.6,
+   "cpu_s": 826.7,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.023,
+    "trajectories_built": 0.465,
+    "grid_points": 0.018,
+    "cpa_within_slant_bounds": 0.055,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 1.12,
+    "fine_scoring": 0.86,
+    "refinement": 2.13
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.661157930557124,
+    "lon": -121.7822055331628
+   },
+   "abstained": false,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_8d5cd6b286f7",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 8.2,
+   "peak_tree_pss_mb": 1669.9,
+   "cpu_s": 819.0,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.027,
+    "trajectories_built": 0.407,
+    "grid_points": 0.013,
+    "cpa_within_slant_bounds": 0.049,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.67,
+    "fine_scoring": 1.01,
+    "refinement": 2.51
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.65879698905807,
+    "lon": -121.78296309040408
+   },
+   "abstained": false,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_f3579a900e6b",
+   "status": "abstained",
+   "mode": "known-time",
+   "wall_s": 4.1,
+   "peak_tree_pss_mb": 1546.6,
+   "cpu_s": 811.0,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.026,
+    "trajectories_built": 0.435,
+    "grid_points": 0.014,
+    "cpa_within_slant_bounds": 0.05,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.51,
+    "fine_scoring": 0.64,
+    "refinement": 2.12
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.66080435762428,
+    "lon": -121.78076046324426
+   },
+   "abstained": true,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_92ab51008566",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 8.6,
+   "peak_tree_pss_mb": 1645.9,
+   "cpu_s": 806.2,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.026,
+    "trajectories_built": 0.406,
+    "grid_points": 0.005,
+    "cpa_within_slant_bounds": 0.04,
+    "mode_b_matches": 0.001,
+    "coarse_scoring": 0.59,
+    "fine_scoring": 1.12,
+    "refinement": 2.41
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.662178956757636,
+    "lon": -121.78208236711738
+   },
+   "abstained": false,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_43725b111a0a",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 6.4,
+   "peak_tree_pss_mb": 1639.1,
+   "cpu_s": 797.9,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.022,
+    "trajectories_built": 0.433,
+    "grid_points": 0.019,
+    "cpa_within_slant_bounds": 0.054,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.87,
+    "fine_scoring": 0.72,
+    "refinement": 1.84
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.69024113007326,
+    "lon": -121.79964256818425
+   },
+   "abstained": false,
+   "grade": "medium"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_9a8b2e7e7813",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 7.4,
+   "peak_tree_pss_mb": 1655.2,
+   "cpu_s": 791.3,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.023,
+    "trajectories_built": 0.4,
+    "grid_points": 0.016,
+    "cpa_within_slant_bounds": 0.048,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.85,
+    "fine_scoring": 0.8,
+    "refinement": 2.07
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.663655261249744,
+    "lon": -121.78135974517166
+   },
+   "abstained": false,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_c2e432b72db0",
+   "status": "abstained",
+   "mode": "known-time",
+   "wall_s": 4.9,
+   "peak_tree_pss_mb": 1543.0,
+   "cpu_s": 784.3,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.023,
+    "trajectories_built": 0.491,
+    "grid_points": 0.006,
+    "cpa_within_slant_bounds": 0.065,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.91,
+    "fine_scoring": 0.85,
+    "refinement": 2.19
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.66275328167439,
+    "lon": -121.7818450669615
+   },
+   "abstained": true,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_7f06b56e9e02",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 6.6,
+   "peak_tree_pss_mb": 1675.8,
+   "cpu_s": 779.4,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.023,
+    "trajectories_built": 0.516,
+    "grid_points": 0.011,
+    "cpa_within_slant_bounds": 0.064,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.73,
+    "fine_scoring": 0.7,
+    "refinement": 1.91
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.66385072313461,
+    "lon": -121.79389149956735
+   },
+   "abstained": false,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_07cfd5af0209",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 7.8,
+   "peak_tree_pss_mb": 1664.6,
+   "cpu_s": 771.6,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.024,
+    "trajectories_built": 0.515,
+    "grid_points": 0.013,
+    "cpa_within_slant_bounds": 0.064,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.7,
+    "fine_scoring": 0.86,
+    "refinement": 2.13
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.682270120271305,
+    "lon": -121.78115614799866
+   },
+   "abstained": false,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_c56ab157f5e1",
+   "status": "abstained",
+   "mode": "known-time",
+   "wall_s": 3.6,
+   "peak_tree_pss_mb": 1531.4,
+   "cpu_s": 763.6,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.024,
+    "trajectories_built": 0.393,
+    "grid_points": 0.004,
+    "cpa_within_slant_bounds": 0.056,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.54,
+    "fine_scoring": 0.53,
+    "refinement": 1.76
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.65845541776727,
+    "lon": -121.78136722412758
+   },
+   "abstained": true,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_0e7e609928d3",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 9.0,
+   "peak_tree_pss_mb": 1540.5,
+   "cpu_s": 759.0,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.026,
+    "trajectories_built": 0.316,
+    "grid_points": 0.013,
+    "cpa_within_slant_bounds": 0.039,
+    "mode_b_matches": 0.001,
+    "coarse_scoring": 0.78,
+    "fine_scoring": 1.07,
+    "refinement": 2.67
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.66469484193424,
+    "lon": -121.782122418398
+   },
+   "abstained": false,
+   "grade": "medium"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_4c3041278e70",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 7.1,
+   "peak_tree_pss_mb": 1657.1,
+   "cpu_s": 748.9,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.025,
+    "trajectories_built": 0.304,
+    "grid_points": 0.013,
+    "cpa_within_slant_bounds": 0.037,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.91,
+    "fine_scoring": 0.79,
+    "refinement": 2.12
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.61712565294513,
+    "lon": -121.83170950769873
+   },
+   "abstained": false,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_599645114c73",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 8.2,
+   "peak_tree_pss_mb": 1683.1,
+   "cpu_s": 741.1,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.025,
+    "trajectories_built": 0.245,
+    "grid_points": 0.005,
+    "cpa_within_slant_bounds": 0.032,
+    "mode_b_matches": 0.001,
+    "coarse_scoring": 0.57,
+    "fine_scoring": 1.09,
+    "refinement": 2.34
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.662591299953526,
+    "lon": -121.78135550051101
+   },
+   "abstained": false,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_8af367c3d175",
+   "status": "abstained",
+   "mode": "known-time",
+   "wall_s": 4.5,
+   "peak_tree_pss_mb": 1555.9,
+   "cpu_s": 733.2,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.027,
+    "trajectories_built": 0.519,
+    "grid_points": 0.013,
+    "cpa_within_slant_bounds": 0.067,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.4,
+    "fine_scoring": 0.95,
+    "refinement": 2.16
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.71376655599416,
+    "lon": -121.78411073133837
+   },
+   "abstained": true,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_190e6990d322",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 7.4,
+   "peak_tree_pss_mb": 1671.7,
+   "cpu_s": 728.2,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.025,
+    "trajectories_built": 0.403,
+    "grid_points": 0.008,
+    "cpa_within_slant_bounds": 0.049,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.7,
+    "fine_scoring": 0.87,
+    "refinement": 2.1
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.660638071730354,
+    "lon": -121.77768632456755
+   },
+   "abstained": false,
+   "grade": "medium"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_0b6e1b8494a1",
+   "status": "abstained",
+   "mode": "known-time",
+   "wall_s": 3.5,
+   "peak_tree_pss_mb": 1541.4,
+   "cpu_s": 720.0,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.026,
+    "trajectories_built": 0.306,
+    "grid_points": 0.011,
+    "cpa_within_slant_bounds": 0.039,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.58,
+    "fine_scoring": 0.54,
+    "refinement": 1.75
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.6599792004351,
+    "lon": -121.78653577167037
+   },
+   "abstained": true,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_b77095e56a57",
+   "status": "abstained",
+   "mode": "known-time",
+   "wall_s": 4.2,
+   "peak_tree_pss_mb": 1548.2,
+   "cpu_s": 715.9,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.028,
+    "trajectories_built": 0.728,
+    "grid_points": 0.008,
+    "cpa_within_slant_bounds": 0.086,
+    "mode_b_matches": 0.001,
+    "coarse_scoring": 0.42,
+    "fine_scoring": 0.72,
+    "refinement": 1.85
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.66276307983436,
+    "lon": -121.78233423752653
+   },
+   "abstained": true,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_c1dfdeab9664",
+   "status": "abstained",
+   "mode": "known-time",
+   "wall_s": 4.3,
+   "peak_tree_pss_mb": 1543.8,
+   "cpu_s": 710.5,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.028,
+    "trajectories_built": 0.697,
+    "grid_points": 0.012,
+    "cpa_within_slant_bounds": 0.088,
+    "mode_b_matches": 0.003,
+    "coarse_scoring": 0.61,
+    "fine_scoring": 0.63,
+    "refinement": 1.9
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.68788201105697,
+    "lon": -121.82335054728486
+   },
+   "abstained": true,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_8781500f8781",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 3.7,
+   "peak_tree_pss_mb": 1558.1,
+   "cpu_s": 704.9,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.025,
+    "trajectories_built": 0.66,
+    "grid_points": 0.025,
+    "cpa_within_slant_bounds": 0.091,
+    "mode_b_matches": 0.001,
+    "coarse_scoring": 0.25,
+    "fine_scoring": 0.46,
+    "refinement": 1.51
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.69300989560247,
+    "lon": -121.84846488312397
+   },
+   "abstained": false,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_f82d3121926d",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 8.7,
+   "peak_tree_pss_mb": 1536.3,
+   "cpu_s": 698.6,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.025,
+    "trajectories_built": 0.493,
+    "grid_points": 0.025,
+    "cpa_within_slant_bounds": 0.062,
+    "mode_b_matches": 0.003,
+    "coarse_scoring": 1.38,
+    "fine_scoring": 0.84,
+    "refinement": 2.1
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.66396005404408,
+    "lon": -121.78178161536702
+   },
+   "abstained": false,
+   "grade": "medium"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_bcbf860b5fb0",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 6.2,
+   "peak_tree_pss_mb": 1688.5,
+   "cpu_s": 689.7,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.026,
+    "trajectories_built": 0.507,
+    "grid_points": 0.011,
+    "cpa_within_slant_bounds": 0.062,
+    "mode_b_matches": 0.001,
+    "coarse_scoring": 0.48,
+    "fine_scoring": 0.63,
+    "refinement": 1.95
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.66360474341362,
+    "lon": -121.78353333717979
+   },
+   "abstained": false,
+   "grade": "low"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_265541d7a696",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 7.7,
+   "peak_tree_pss_mb": 1672.3,
+   "cpu_s": 682.7,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.029,
+    "trajectories_built": 0.503,
+    "grid_points": 0.008,
+    "cpa_within_slant_bounds": 0.062,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 0.73,
+    "fine_scoring": 0.79,
+    "refinement": 2.55
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.69128590479634,
+    "lon": -121.78360986960345
+   },
+   "abstained": false,
+   "grade": "medium"
+  },
+  {
+   "workload": "W4",
+   "job_id": "job_e179f885be8d",
+   "status": "succeeded",
+   "mode": "known-time",
+   "wall_s": 8.9,
+   "peak_tree_pss_mb": 1532.8,
+   "cpu_s": 674.9,
+   "stages_s": {
+    "segments_time_bbox_speed": 0.03,
+    "trajectories_built": 0.449,
+    "grid_points": 0.03,
+    "cpa_within_slant_bounds": 0.053,
+    "mode_b_matches": 0.002,
+    "coarse_scoring": 1.18,
+    "fine_scoring": 0.93,
+    "refinement": 2.22
+   },
+   "screen": null,
+   "top1": {
+    "lat": 37.67532410494779,
+    "lon": -121.77438203424684
+   },
+   "abstained": false,
+   "grade": "low"
+  }
+ ]
+}

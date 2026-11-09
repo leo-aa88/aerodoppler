@@ -250,6 +250,7 @@ class QualitySettings(BaseModel):
     max_assignments: int = 20_000_000  # candidates held as arrays; memory guard only
     screen_budget_s: float = 1800.0  # wall-clock budget of the anytime screen (prior order)
     screen_batch: int = 0  # candidates per screening batch; 0 = max(20000, 4000 x workers)
+    batched_screen: bool = True  # numba batch scorer for the screen (False = reference path)
     workers: int = 0  # 0 = cpu_count - 1
     ground_elevation_m: float | None = None  # explicit fallback when no DEM is available
     ground_elevation_sigma_m: float | None = None
