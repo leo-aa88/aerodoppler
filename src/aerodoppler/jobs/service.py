@@ -139,7 +139,16 @@ def run_inline(
         deadline = time.time() + wait_s
         cap = capacity_for(settings)
         announced = 0.0
+        reconciled = 0.0
         while not queue.claim_inline(job.id, cap, pid, started):
+            if time.time() - reconciled > 10.0:
+                # without a running scheduler (CLI only) nothing else would free a slot held by
+                # a job whose process died (e.g. a killed benchmark): finalise such rows here
+                from aerodoppler.jobs.scheduler import Scheduler
+
+                Scheduler(settings, queue).reconcile()
+                reconciled = time.time()
+                continue
             if time.time() > deadline:
                 queue.request_cancel(job.id)
                 raise JobRejected("no capacity became free in time", "timeout")
@@ -199,13 +208,16 @@ def run_inline(
         queue.finish(job.id, token, status, result=res, resources=sup.resources())
         return queue.get(job.id), out  # type: ignore[return-value]
     except JobCancelled as e:
-        status = "cancelled"
+        # same rule as worker jobs: a stop the watchdog caused (memory, CPU, disk budget) is a
+        # failure with its reason, not an operator cancellation
+        reason = sup.reason or str(e)
+        status = "cancelled" if reason.startswith("cancelled") else "failed"
         queue.finish(
             job.id,
             token,
-            "cancelled",
-            error_code="cancelled",
-            error_message=sup.reason or str(e),
+            status,
+            error_code="cancelled" if status == "cancelled" else "budget_exceeded",
+            error_message=reason,
             resources=sup.resources(),
         )
         raise

@@ -368,3 +368,38 @@ def test_worker_sigterm_handler_never_touches_the_database(tmp_path):
     sup.on_term_flag()
     assert sup.cancel.is_set() and q.get(j.id).cancel_requested
     assert "SIGTERM" in (sup.reason or "")
+
+
+def test_inline_job_stopped_by_the_memory_watchdog_is_a_failure(tmp_path):
+    """A semi-synthetic benchmark search stopped by the memory backstop was recorded as
+    "cancelled" (by an operator); it is a failure with the budget reason, as for worker jobs."""
+    from aerodoppler.jobs.queue import JobCancelled
+    from aerodoppler.jobs.service import queue_for, run_inline
+
+    s = Settings(data_dir=tmp_path, offline=True)
+    s.ensure_dirs()
+    # holding 300 MB against a 1 MB reservation: above 1.5 x 1 MB + 200 MB at the first beat
+    with pytest.raises(JobCancelled):
+        run_inline(s, "diagnostic", {"seconds": 15, "reserve_mb": 1, "allocate_mb": 300})
+    (job,) = queue_for(s).list(types=["diagnostic"])
+    assert job.status == "failed" and job.error_code == "budget_exceeded"
+    assert job.error_message.startswith("memory budget exceeded")
+
+
+def test_inline_job_frees_slots_held_by_dead_inline_jobs(tmp_path):
+    """Regression: after a benchmark process was killed, its rows stayed "running" and the next
+    CLI run waited forever for the slot (no scheduler runs when only the CLI is used)."""
+    from aerodoppler.jobs.scheduler import capacity_for
+    from aerodoppler.jobs.service import queue_for, run_inline
+
+    s = Settings(data_dir=tmp_path, offline=True)
+    s.ensure_dirs()
+    q = queue_for(s)
+    dead = _dead_pid()
+    for k in range(2):  # both "light" slots held by a process that no longer exists
+        j, _ = submit_job(s, "diagnostic", {"seconds": 1, "k": k}, queue=q, mode="inline")
+        assert q.claim_inline(j.id, capacity_for(s), dead, 1.0)
+    t0 = time.time()
+    job, _ = run_inline(s, "diagnostic", {"seconds": 0.2}, wait_s=60.0)
+    assert job.status == "succeeded" and time.time() - t0 < 40
+    assert {j.status for j in q.list(types=["diagnostic"]) if j.id != job.id} == {"interrupted"}
