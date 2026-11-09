@@ -405,6 +405,28 @@ def cluster_cells(sup: Support, cfg: BlindConfig) -> list[dict[str, Any]]:
     return tiles
 
 
+def region_coverage(
+    n_tiles: int, searched: list[dict[str, Any]], stopped_by: str, area_km2: float
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, int]]:
+    """How much of the supported area was actually searched. A region whose engine run failed
+    (e.g. no terrain data offline) counts as NOT searched, never as "no match"."""
+    failed = [s for s in searched if s.get("error")]
+    kinds: dict[str, int] = {}
+    for f in failed:
+        k = str(f["error"]).split(":")[0][:60]
+        kinds[k] = kinds.get(k, 0) + 1
+    coverage = {
+        "supported_clusters": n_tiles,
+        "searched_clusters": len(searched) - len(failed),
+        "failed_clusters": len(failed),
+        "failure_kinds": kinds,
+        "not_reached_clusters": n_tiles - len(searched),
+        "stopped_by": stopped_by,
+        "supported_area_km2": round(area_km2),
+    }
+    return coverage, failed, kinds
+
+
 ProgressFn = Callable[[str, dict[str, Any]], None]
 
 
@@ -599,12 +621,7 @@ def run_blind_search(
     )
     # ---- verdict -------------------------------------------------------------------------------
     verdict: dict[str, Any]
-    coverage = {
-        "supported_clusters": len(tiles),
-        "searched_clusters": len(searched),
-        "stopped_by": stopped_by,
-        "supported_area_km2": round(sup.area_km2),
-    }
+    coverage, failed, kinds = region_coverage(len(tiles), searched, stopped_by, sup.area_km2)
     if not tiles:
         verdict = {
             "answer": "abstain",
@@ -613,7 +630,13 @@ def run_blind_search(
     elif not final:
         verdict = {
             "answer": "abstain",
-            "reason": "no supported region produced a match that passes the engine's evidence thresholds",
+            "reason": "no supported region produced a match that passes the engine's evidence thresholds"
+            + (
+                f"; {len(failed)} region(s) could not be searched and "
+                f"{len(tiles) - len(searched)} were not reached"
+                if failed or len(tiles) > len(searched)
+                else ""
+            ),
         }
     else:
         top = final[0]
@@ -634,7 +657,14 @@ def run_blind_search(
         if stopped_by == "budget":
             grade = "low"
             reasons.append(
-                f"only {len(searched)} of {len(tiles)} supported regions were searched before the budget ran out"
+                f"only {len(searched)} of {len(tiles)} supported regions were reached before the budget ran out"
+            )
+        if failed:
+            grade = "low"
+            reasons.append(
+                f"{len(failed)} supported region(s) could not be searched ("
+                + ", ".join(f"{k}: {v}" for k, v in kinds.items())
+                + ")"
             )
         verdict = {
             "answer": "location",

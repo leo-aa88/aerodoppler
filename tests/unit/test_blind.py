@@ -21,6 +21,7 @@ from aerodoppler.search.blind import (
     Support,
     _around,
     cluster_cells,
+    region_coverage,
     support_unknown_time,
 )
 
@@ -216,3 +217,15 @@ def test_blind_search_api_validates_before_queueing(flights):
             },
         )
         assert r.status_code == 404
+
+
+def test_failed_regions_count_as_not_searched():
+    searched = [
+        {"k": 0, "best_score": 4.2},
+        {"k": 1, "error": "DEM unavailable: no DEM available for bbox (…)"},
+        {"k": 2, "error": "DEM unavailable: no DEM available for bbox (…)"},
+    ]
+    cov, failed, kinds = region_coverage(5, searched, "budget", 1234.4)
+    assert cov["searched_clusters"] == 1 and cov["failed_clusters"] == 2
+    assert cov["not_reached_clusters"] == 2 and cov["stopped_by"] == "budget"
+    assert kinds == {"DEM unavailable": 2} and len(failed) == 2
