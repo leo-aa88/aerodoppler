@@ -815,6 +815,47 @@ complete baseline; W3 stops at its screen budget and cannot be compared exactly)
    arithmetic, and the reference path already ran it in the numba kernel. W2 totals with the
    batched screen and coarse stage: 324.3 / 245.9 s, peak 2,242 / 2,091 MB.
 
+2. **Coarse f0 polish at half width** (`coarse_polish_span` 1.0 → 0.5: ±0.75 % instead of
+   ±1.5 % around the best coarse f0, 39 instead of 77 values; the fine stage is unchanged).
+   Rationale: the coarse grid steps by 1.5 %, so the nearest grid point is at most 0.75 % from
+   any pitch, and the polish starts from the best grid point. That holds only when the coarse
+   sweep picks the grid point next to the peak, so it was measured, not assumed:
+
+   * Replays of the 35 searches at span 1.0 / 0.5 / 0 (same code otherwise). Top answer and
+     grade identical in 35/35 at every width. Candidate lists (position, flights) and scores
+     (to 10⁻⁹) identical in 35/35 at 1.0 and 0.5; at 0, 34/35 (Livermore `job_c1dfdeab9664`:
+     same top candidate, candidates 2–3 differ). Gate pass/fail identical in 35/35 at 1.0 and
+     0.5; at 0.5 the only text difference (10/35) is the coarse diagnostic "best discarded …",
+     the coarse score of the best candidate not kept. Coarse-stage time, sums: W2 327.2 → 207.1
+     → 79.1 s, W1 80.1 → 51.1 → 21.6 s, W4 10.5 → 6.1 → 1.0 s. W2 totals 324.3 / 245.9 →
+     287.0 / 178.7 s at 0.5. Span 0 was not adopted because it already changed one result.
+   * Full SYNTHETIC benchmark (`aerodoppler benchmark` cases, 12 Mode A + 12 Mode B), span 1.0
+     (commit 6c4dd9d) vs span 0.5, both fresh runs on 8 workers (light unit tests ran during
+     the 1.0 run):
+
+     | | Mode A answered | Mode A top-1 error median / p90 / max | Mode B answered | Mode B median / p90 / max | runtime median A / B |
+     |---|---|---|---|---|---|
+     | span 1.0 | 12/12 | 31.2 / 45.0 / 53.0 m | 12/12 | 7.3 / 21.4 / 69.9 m | 154.1 / 82.1 s |
+     | span 0.5 | 12/12 | 31.2 / 45.0 / 53.0 m | 12/12 | 7.3 / 21.4 / 69.9 m | 137.1 / 77.5 s |
+
+     Per-case errors identical in all 24, all within 300 m, flights correct 24/24, grades
+     identical (21 high, 3 medium). Coarse-stage time summed over the 24 searches 407.4 →
+     232.2 s; total 2,894.9 → 2,622.7 s. A replay of the 24 span-1.0 requests at 0.5: candidate
+     lists and scores identical in 24/24, gate pass/fail 24/24 (text differs in 8/24, only the
+     "best discarded" diagnostic), coarse time 407.4 → 249.6 s.
+   * Boundary tests (`tests/unit/test_coarse_polish.py`). A pitch 0, ¼ or ½ coarse step from
+     the grid, strong, weak and very weak ridge: half width = full width exactly, and the
+     polished f0 is within 0.05 % of the truth (strong and weak). A quarter-width polish or none
+     misses the halfway pitch, so the tests detect a polish that is too narrow. Two equal ridges
+     each halfway between grid points: half = full. **Known limitation:** when the ridge points
+     sit on a weaker ridge at a grid point and a stronger ridge lies 0.7 coarse steps away, half
+     width stays on the weaker ridge and gives that candidate a lower coarse score (1.7–2.6
+     vs 3.37 at full width in the test scene). The coarse score only decides whether a candidate
+     reaches the top 400. The fine stage recovers the stronger ridge in that scene when the
+     weaker one has amplitude 2.0; at 3.0 the fine stage also stays on the weaker ridge, which
+     is independent of this setting. This is empirical equivalence on the workloads above, not
+     a guarantee for every recording; `coarse_polish_span=1.0` restores the previous behaviour.
+
 ### Final test summary (observed, final code)
 
 ```

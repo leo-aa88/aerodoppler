@@ -243,7 +243,7 @@ class QualitySettings(BaseModel):
     max_candidates_coarse: int = 400_000
     coarse_t0_step_s: float = 2.0
     coarse_f0_step_fraction: float = 0.015
-    coarse_polish_span: float = 1.0  # coarse-stage f0 polish range in coarse f0 steps (0 = off)
+    coarse_polish_span: float = 0.5  # coarse-stage f0 polish range in coarse f0 steps (0 = off)
     coarse_keep_top: int = 400
     ultra_keep_top: int = 40_000  # pairs surviving the ultra-coarse screen (all pairs scored)
     ultra_t0_step_s: float = 4.0

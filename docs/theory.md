@@ -111,7 +111,8 @@ events with no ridge evidence, weighted by audibility and aircraft class, capped
 
 With real traffic the number of Mode A pairs reaches 5·10⁵ and more. The funnel is: an
 **anytime** ultra-coarse screen (2 harmonics, 3 f0 values, 4 s shift step, ≤150 curve samples,
-~1.5 ms per pair) → top 40,000 → coarse (3 harmonics, 1.5 % f0 step, 2 s shifts) → top 400 →
+~1.5 ms per pair) → top 40,000 → coarse (3 harmonics, 1.5 % f0 step, 2 s shifts, f0 polish
+±0.75 % in 0.04 % steps) → top 400 →
 fine (full sweep, drift, silence) → top 5 distinct basins → 100 m / 25 m refinement.
 
 The ultra-coarse screen scores candidates in prior order, in batches, until everything is
