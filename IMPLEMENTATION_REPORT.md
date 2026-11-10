@@ -739,6 +739,63 @@ all nine detected events are *tonal only* and the search is refused. No aircraft
 is visible anywhere in its 0–400 Hz spectrogram, so refusing is the correct outcome there; this
 is one recording, not a measured false-positive rate.
 
+### Search performance 2026-11-09 — pruning, memory, batched screen (observed)
+
+Workloads (`scripts/perf_baseline.py`; baseline `docs/perf/perf_baseline_phase0_2026-11-09.json`,
+branch at 1919da5, 8 workers): **W1** SYNTHETIC `base_snr10`, `many_distractors` (Mode A and B);
+**W2** semi-synthetic real-trajectory `n2920w8115_s1`, `deland_s1` (central Florida, ~1,250
+segments); **W3** semi-synthetic real-trajectory `midtown_w_s1` on the 2026-11-04 Manhattan day
+(jets and helicopters included: 5,722 segments, 25,375 grid points); **W4** the 29 Livermore cases.
+Before/after comparisons replay the saved search requests (same recording and events):
+re-synthesising a scene is not bit-reproducible — two builds of W3 gave detection qualities that
+differed in the 6th decimal and picked a different event pair.
+
+Baseline: W1 77–177 s, peak 1.0–1.7 GB, all high; W2 412 / 525 s, peak 3.6 / 3.7 GB, the screen
+scored all 0.42 / 0.50 M candidates at ~1.8–1.9 k/s and took half the time (coarse scoring 30 %),
+answers 12.1 km and 13.4 m, both low; W4 unchanged from 2026-11-05 (18 answered, 6 medium /
+12 low, median 390.5 m); **W3 was stopped by the memory backstop at 12,542 MB after 1,357 s**
+(53.4 M CPA entries, 33.6 M pairs cut to 20 M by the memory guard).
+
+1. **Lossless CPA pruning.** Grid points farther than the slant bound from every 32-sample chunk
+   box of a track are not evaluated, and entries no event can use (its speed and slant bounds,
+   the filter every consumer applies) are not stored. W3: 54 % of segment–point pairs never
+   evaluated, 53.4 → 37.5 M entries. Test: pruned table = brute force after the event filter.
+2. **Screen memory.** Scored candidates that can no longer reach the kept top are released as the
+   screen proceeds (reference path; the batched path never creates them).
+3. **Batched screen** (`search/batch.py`): the ultra-coarse computation of `_score_point` —
+   emission-time curve, ridge-implied f0 per clock shift, slope weights, kernel sweep, shared-clock
+   combination, unexplained-event rule — as one numba function over a batch, in threads on shared
+   arrays. Parity with the reference path on random candidates: max |Δ| 3.4·10⁻¹⁵; end-to-end
+   test: identical candidates, scores and grade with either path. The reference path remains
+   (`batched_screen=False`, and for multi-event hypotheses).
+
+Results (replays of the baseline requests):
+
+* Identical answers (top candidate moved 0.0 m, same grade or abstention) in all 35 searches with
+  a complete baseline: W1 4/4, W2 2/2, W4 29/29.
+* W3 now completes (graded low; ~10 km from the observer): peak 10,456 MB with 1+2 (10,912 MB
+  with 1 alone). Its screen stops at its 1,800 s budget after 22–23 % of the 20 M candidates, so
+  answers of budget-stopped runs differ slightly between runs (4.35 M vs 4.54 M scored).
+* Peak memory: W2 3.7 / 3.6 → 2.8 / 2.8 GB; W4 ~1.5–1.8 → ~0.95–1.2 GB per case.
+* Speed, one W2 request (`deland_s1`) on an idle machine, 8 workers, same answer in every run:
+
+  | code | screen | coarse scoring | total |
+  |---|---|---|---|
+  | before (1919da5), two runs | 256 / 279 s | 179 / 178 s | 465 / 490 s |
+  | pruning + release, reference screen, two runs | 318 / 299 s | 214 / 177 s | 562 / 506 s |
+  | batched screen | 96 s | 176 s | 304 s |
+  | batched screen, sorted ridge points with a merge walk | **54 s** | 149 s | **228 s** |
+
+  The other W2 request (`n2920w8115_s1`, 13.4 m) with the final batched screen: screen 261 → 50 s,
+  total 525 → 306 s (baseline measured during the benchmark run), same answer and grade.
+
+  The reference screen after 1+2 was 7–24 % slower than before in these two pairs of runs; the
+  cause was not found (the computation and its results are unchanged, and the laptop's speed
+  drifts between runs, cf. the coarse stage 214 vs 177 s with identical code). The batched
+  screen is the default, so this affects only multi-event searches.
+* Remaining: the coarse stage (149 s) now dominates W2; W3 still screens only ~23 % of its
+  candidates within the budget. Next: batch the coarse and fine stages the same way.
+
 ### Final test summary (observed, final code)
 
 ```

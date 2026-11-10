@@ -15,6 +15,7 @@ from typing import Any
 
 import numpy as np
 import polars as pl
+from numba import njit
 from numpy.typing import NDArray
 
 from aerodoppler.adsb.index import FlightIndex
@@ -113,6 +114,19 @@ class AssignmentPool:
                 float(self.class_prior[i]),
             )
             for i in range(a, min(b, len(self)))
+        ]
+
+    def take_indices(self, idx: np.ndarray) -> list[Assignment]:
+        return [
+            Assignment(
+                int(self.point_idx[i]),
+                tuple(int(x) for x in self.seg[i]),
+                tuple(float(x) for x in self.tau[i]),
+                tuple(float(x) for x in self.slant[i]),
+                float(self.t0_center[i]),
+                float(self.class_prior[i]),
+            )
+            for i in idx
         ]
 
     @classmethod
@@ -254,6 +268,40 @@ def build_grid(
     return GridWithElevation(grid, ground, np.asarray(sig), hae, ecef, elev.flags, elev.source)
 
 
+@njit(cache=True)
+def _near_chunk_boxes(X, lo, hi, r_max):  # pragma: no cover - numba
+    """True for observers within ``r_max`` of at least one axis-aligned chunk box. A point
+    farther than ``r_max`` from every box is farther than ``r_max`` from the whole track, so
+    skipping it never drops a CPA entry inside the slant bounds."""
+    M = X.shape[0]
+    C = lo.shape[0]
+    r2 = r_max * r_max
+    out = np.zeros(M, dtype=np.bool_)
+    for m in range(M):
+        for c in range(C):
+            d2 = 0.0
+            for k in range(3):
+                v = X[m, k]
+                if v < lo[c, k]:
+                    d2 += (lo[c, k] - v) ** 2
+                elif v > hi[c, k]:
+                    d2 += (v - hi[c, k]) ** 2
+            if d2 <= r2:
+                out[m] = True
+                break
+    return out
+
+
+def _chunk_boxes(pos: NDArray[np.float64], k: int = 32) -> tuple[np.ndarray, np.ndarray]:
+    """Bounding boxes of consecutive chunks of ``k`` samples; consecutive chunks share their
+    boundary sample so every track segment lies inside one box."""
+    n = len(pos)
+    starts = np.arange(0, max(n - 1, 1), k)
+    lo = np.array([pos[s : min(s + k + 1, n)].min(axis=0) for s in starts])
+    hi = np.array([pos[s : min(s + k + 1, n)].max(axis=0) for s in starts])
+    return lo, hi
+
+
 def sparse_cpa(
     segments: list[SegmentInfo],
     grid: GridWithElevation,
@@ -262,20 +310,43 @@ def sparse_cpa(
     d_max: float,
     counters: list[StageCounter],
     coarse_dt_s: float = 10.0,
+    event_bounds: list[tuple[float, float, float, float]] | None = None,
 ) -> SparseCPA:
+    """Closest approach of every segment to every grid point, kept within the slant bounds.
+
+    Lossless pruning: (1) grid points farther than ``d_max`` from every chunk box of a track
+    are not evaluated (their CPA cannot be inside the bounds); (2) with ``event_bounds`` —
+    one ``(v_min, v_max, d_min, d_max)`` per event — an entry is kept only if at least one
+    event could use it, which is exactly the filter every consumer applies afterwards."""
     t0 = time.perf_counter()
     parts: list[tuple[np.ndarray, ...]] = []
+    X_all = grid.observer_ecef
+    n_eval = 0
+    n_in_bounds = 0
     for si, seg in enumerate(segments):
         traj = seg.traj_build.trajectory
         assert traj is not None
         coarse_traj = traj.subsample(coarse_dt_s) if coarse_dt_s > 0 else traj
-        te, r, tau = closest_approach_batch(coarse_traj, grid.observer_ecef, c_mps)
+        lo, hi = _chunk_boxes(coarse_traj.pos)
+        near = np.flatnonzero(_near_chunk_boxes(X_all, lo, hi, d_max))
+        if near.size == 0:
+            continue
+        n_eval += int(near.size)
+        te, r, tau = closest_approach_batch(coarse_traj, X_all[near], c_mps)
         m = (r >= d_min) & (r <= d_max) & np.isfinite(r)
         if not m.any():
             continue
-        idx = np.flatnonzero(m)
-        v = np.linalg.norm(traj.velocity(te[idx]), axis=1)
-        parts.append((np.full(len(idx), si), idx, te[idx], r[idx], tau[idx], v))
+        n_in_bounds += int(m.sum())
+        sel = np.flatnonzero(m)
+        v = np.linalg.norm(traj.velocity(te[sel]), axis=1)
+        if event_bounds:
+            keep = np.zeros(len(sel), dtype=bool)
+            for v_lo, v_hi, r_lo, r_hi in event_bounds:
+                keep |= (v >= v_lo) & (v <= v_hi) & (r[sel] >= r_lo) & (r[sel] <= r_hi)
+            sel, v = sel[keep], v[keep]
+            if sel.size == 0:
+                continue
+        parts.append((np.full(len(sel), si), near[sel], te[sel], r[sel], tau[sel], v))
     if not parts:
         empty = np.empty(0)
         res = SparseCPA(
@@ -285,15 +356,17 @@ def sparse_cpa(
         res = SparseCPA(*(np.concatenate([p[i] for p in parts]) for i in range(6)))  # type: ignore[arg-type]
         res.seg_idx = res.seg_idx.astype(np.int64)
         res.point_idx = res.point_idx.astype(np.int64)
-    counters.append(
-        _counter(
-            "cpa_within_slant_bounds",
-            len(segments) * len(grid.grid),
-            len(res.tau),
-            t0,
-            f"slant in [{d_min:.0f}, {d_max:.0f}] m",
-        )
+    n_all = len(segments) * len(grid.grid)
+    note = (
+        f"slant in [{d_min:.0f}, {d_max:.0f}] m; {n_eval} of {n_all} segment-point pairs "
+        f"evaluated (the rest are farther than {d_max:.0f} m from the track)"
     )
+    if event_bounds:
+        note += (
+            f"; {len(res.tau)} of {n_in_bounds} in-bounds entries usable by at least one event "
+            "(speed and slant bounds)"
+        )
+    counters.append(_counter("cpa_within_slant_bounds", n_all, len(res.tau), t0, note))
     return res
 
 
