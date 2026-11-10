@@ -5,6 +5,7 @@ unexplained third event and curves that leave the trajectory."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -14,7 +15,7 @@ from aerodoppler.geo.coordinates import geodetic_to_ecef
 from aerodoppler.models import SearchMode
 from aerodoppler.physics.doppler import closest_approach
 from aerodoppler.physics.trajectory import Trajectory
-from aerodoppler.search.batch import UltraBatchScorer
+from aerodoppler.search.batch import BatchScorer
 from aerodoppler.search.engine import UNEXPLAINED_EVENT_SCORE, _score_point, _t0_candidates
 from aerodoppler.search.score import ScoreConfig
 
@@ -92,6 +93,13 @@ def _world(seed=7):
         alphas=(0.0,),
         f0_polish_step_fraction=0.0,
     )
+    # the engine's coarse-stage settings: 3 harmonics, 1.5 % f0 step, default f0 polish
+    coarse = ScoreConfig(
+        f0_step_fraction=0.015,
+        harmonics=(1, 2, 3),
+        harmonic_weights=(1.0, 0.8, 0.6),
+        alphas=(0.0,),
+    )
     ctx = SimpleNamespace(
         spec=spec,
         segments=segs,
@@ -99,7 +107,8 @@ def _world(seed=7):
         events=events,
         c=SimpleNamespace(c_mps=C),
         ultra_cfg=cfg,
-        coarse_cfg=cfg,
+        coarse_cfg=coarse,
+        coarse_step_s=2.0,
         curve_dt_s=0.5,
         mode=SearchMode.UNKNOWN_TIME,
         sweep_s=24.0,
@@ -110,9 +119,14 @@ def _world(seed=7):
     return rng, ctx, cfg
 
 
+@pytest.mark.parametrize(
+    ("ultra", "polish_span"), [(True, None), (False, 1.0), (False, 0.5)]
+)  # coarse stage at full and half f0 polish width
 @pytest.mark.parametrize("seed", [7, 11])
-def test_batched_ultra_scores_match_the_reference_path(seed):
+def test_batched_scores_match_the_reference_path(seed, ultra, polish_span):
     rng, ctx, cfg = _world(seed)
+    if polish_span is not None:
+        ctx.coarse_cfg = replace(ctx.coarse_cfg, f0_polish_span=polish_span)
     obs, seg, tau, t0c = [], [], [], []
     for _ in range(60):
         lat, lon = 29.0 + rng.uniform(-0.04, 0.04), -81.2 + rng.uniform(-0.04, 0.04)
@@ -129,14 +143,16 @@ def test_batched_ultra_scores_match_the_reference_path(seed):
         tau.append(ta)
         t0c.append(ta[0] - ctx.feats[0].t_center_s + rng.normal(0, 6.0))
     obs, seg, tau, t0c = map(np.asarray, (obs, seg, tau, t0c))
-    offsets = _t0_candidates(ctx, 0.0, True, True)
-    got = UltraBatchScorer(ctx, cfg).score(obs, seg, tau, t0c, offsets, UNEXPLAINED_EVENT_SCORE)
+    offsets = _t0_candidates(ctx, 0.0, True, ultra)
+    got = BatchScorer(ctx, cfg if ultra else ctx.coarse_cfg, ultra=ultra).score(
+        obs, seg, tau, t0c, offsets, UNEXPLAINED_EVENT_SCORE
+    )
     want = []
     for b in range(len(obs)):
         a = SimpleNamespace(
             seg_idx=tuple(int(v) for v in seg[b]), tau=tuple(tau[b]), t0_center=float(t0c[b])
         )
-        want.append(_score_point(ctx, a, obs[b], coarse=True, ultra=True).combined)
+        want.append(_score_point(ctx, a, obs[b], coarse=True, ultra=ultra).combined)
     want = np.asarray(want)
     assert np.isfinite(want).all() and (want > -9.0).sum() >= 20  # meaningful, not all invalid
     np.testing.assert_allclose(got, want, rtol=0, atol=1e-9)

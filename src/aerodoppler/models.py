@@ -243,6 +243,7 @@ class QualitySettings(BaseModel):
     max_candidates_coarse: int = 400_000
     coarse_t0_step_s: float = 2.0
     coarse_f0_step_fraction: float = 0.015
+    coarse_polish_span: float = 0.5  # coarse-stage f0 polish range in coarse f0 steps (0 = off)
     coarse_keep_top: int = 400
     ultra_keep_top: int = 40_000  # pairs surviving the ultra-coarse screen (all pairs scored)
     ultra_t0_step_s: float = 4.0
@@ -250,7 +251,8 @@ class QualitySettings(BaseModel):
     max_assignments: int = 20_000_000  # candidates held as arrays; memory guard only
     screen_budget_s: float = 1800.0  # wall-clock budget of the anytime screen (prior order)
     screen_batch: int = 0  # candidates per screening batch; 0 = max(20000, 4000 x workers)
-    batched_screen: bool = True  # numba batch scorer for the screen (False = reference path)
+    # numba batch scorer for the screen and the coarse stage (False = reference path)
+    batched_screen: bool = True
     workers: int = 0  # 0 = cpu_count - 1
     ground_elevation_m: float | None = None  # explicit fallback when no DEM is available
     ground_elevation_sigma_m: float | None = None
