@@ -185,6 +185,7 @@ class ScoreConfig:
     f0_halfwidth_fraction: float = 0.03  # sweep ± this around the ridge-derived f0 estimate
     f0_polish_step_fraction: float = 0.0004  # second-pass fine f0 step (0 disables)
     f0_polish_top_shifts: int = 8
+    f0_polish_span: float = 1.0  # polish range in units of f0_step_fraction (each side)
     slope_weight_floor: float = 0.3  # weight of plateau samples relative to the steepest sample
     excursion_penalty_z: float = 6.0  # z per unit |log(R_pred / R_obs)| (velocity plausibility)
     min_coverage: float = 0.4  # per-event coverage below this is penalised
@@ -323,7 +324,7 @@ def score_event_curve(
     # leading time shifts only (cheap: a handful of shifts).
     if cfg.f0_polish_step_fraction > 0 and cfg.f0_polish_top_shifts > 0:
         top = np.argsort(-best)[: cfg.f0_polish_top_shifts]
-        n_f = int(np.ceil(cfg.f0_step_fraction / cfg.f0_polish_step_fraction))
+        n_f = int(np.ceil(cfg.f0_polish_span * cfg.f0_step_fraction / cfg.f0_polish_step_fraction))
         rel_fine = (1.0 + cfg.f0_polish_step_fraction) ** np.arange(-n_f, n_f + 1)
         for si in top:
             if best[si] <= -9.0:

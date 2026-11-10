@@ -1,4 +1,4 @@
-"""Batched scoring of the ultra-coarse screen (Phase 2 of the scoring plan).
+"""Batched scoring of the ultra-coarse screen and the coarse stage.
 
 The reference path scores one candidate at a time in Python: per event a predicted curve from
 the trajectory (``physics.doppler.predict``), ridge-implied f0 estimates per clock shift, a
@@ -7,8 +7,9 @@ slope weighting, the ``_score_kernel`` sweep and the shared-clock combination
 Profiling the Manhattan-style workload showed the numba kernel at ~15 % of a worker's time;
 the rest was Python and small NumPy calls per candidate.
 
-This module re-implements that exact computation for the ultra-coarse configuration (one drift
-value, no f0 polish) as one numba function over a batch of candidates, run in threads with
+This module re-implements that exact computation for the screen and coarse configurations (one
+drift value; the coarse stage with its f0 polish pass) as one numba function over a batch of
+candidates, run in threads with
 ``prange`` on shared arrays (no process pool, no copy-on-write growth). Every step mirrors the
 reference, including its edge rules, and ``tests/unit/test_batch_scoring.py`` checks parity on
 random candidates. Physics is unchanged: emission-time sampling of the trajectory, reception
@@ -173,6 +174,85 @@ def _gradient(y, x):  # pragma: no cover - numba
 
 
 @njit(cache=True)
+def _sweep(  # pragma: no cover - numba
+    W,
+    t_spec0,
+    hop,
+    f_spec0,
+    df,
+    t_rel,
+    D,
+    pw,
+    sh,
+    f0,
+    win_lo,
+    win_hi,
+    harmonics,
+    hweights,
+    wsum,
+    min_valid,
+):
+    """search.score._score_kernel for one (shift, f0) and alpha = 0: whole-window mean of the
+    clipped whitened spectrogram along the predicted harmonics. Returns (score, coverage)."""
+    T, F = W.shape
+    H = harmonics.shape[0]
+    n = t_rel.shape[0]
+    acc = 0.0
+    cov = 0.0
+    wsum_pts = 0.0
+    nvalid = 0
+    nin = 0
+    for i in range(n):
+        tr = t_rel[i] + sh
+        if tr < win_lo or tr > win_hi:
+            continue
+        nin += 1
+        w_i = pw[i]
+        ti = (tr - t_spec0) / hop
+        if ti < 0.0 or ti > T - 1.0:
+            continue
+        r0 = int(ti)
+        if r0 >= T - 1:
+            r0 = T - 2
+        fr = ti - r0
+        point_ok = False
+        for hh in range(H):
+            f = f0 * harmonics[hh] * D[i]
+            fi = (f - f_spec0) / df
+            if fi < 0.0 or fi > F - 1.0:
+                continue
+            c0 = int(fi)
+            if c0 >= F - 1:
+                c0 = F - 2
+            fc = fi - c0
+            v = (
+                W[r0, c0] * (1 - fr) * (1 - fc)
+                + W[r0, c0 + 1] * (1 - fr) * fc
+                + W[r0 + 1, c0] * fr * (1 - fc)
+                + W[r0 + 1, c0 + 1] * fr * fc
+            )
+            if v < CLIP_LO:
+                v = CLIP_LO
+            elif v > CLIP_HI:
+                v = CLIP_HI
+            acc += hweights[hh] * v * w_i
+            if v > ON_RIDGE_Z:
+                cov += hweights[hh] * w_i
+            point_ok = True
+        if point_ok:
+            nvalid += 1
+            wsum_pts += w_i
+    sc = NEG
+    cv = 0.0
+    if nvalid > 0 and nin > 0 and wsum_pts > 0.0:
+        frac = nvalid / nin
+        if frac >= min_valid:
+            sc = acc / (wsum_pts * wsum) * frac
+        cv = cov / (wsum_pts * wsum) * frac
+    return sc, cv
+
+
+@njit(cache=True)
 def _event_curve_score(  # pragma: no cover - numba
     W,
     t_spec0,
@@ -197,12 +277,14 @@ def _event_curve_score(  # pragma: no cover - numba
     broad,
     slope_floor,
     min_valid,
+    rel_fine,
+    polish_top,
 ):
-    """score_event_curve for one drift value (alpha = 0) and no f0 polish.
+    """score_event_curve for one drift value (alpha = 0), with the optional f0 polish pass
+    (``rel_fine`` empty = off).
     Returns (best per shift, coverage of that best per shift, predicted excursion)."""
     S = shifts.shape[0]
     n = t_rel.shape[0]
-    T, F = W.shape
     H = harmonics.shape[0]
     wsum = 0.0
     for h in range(H):
@@ -214,7 +296,7 @@ def _event_curve_score(  # pragma: no cover - numba
     for si in range(S):
         m = 0
         if n > 0:
-            # ridge points are sorted by time (UltraBatchScorer), so the interpolation interval
+            # ridge points are sorted by time (BatchScorer), so the interpolation interval
             # only moves forward: a merge walk gives exactly np.interp's interval (the rightmost
             # j <= n-2 with t_rel[j] <= x) without a binary search per point
             j = 0
@@ -267,66 +349,68 @@ def _event_curve_score(  # pragma: no cover - numba
             pw[i] = slope_floor + (1.0 - slope_floor) * dD[i] / mx
     best = np.full(S, NEG)
     best_cov = np.zeros(S)
+    best_k = np.zeros(S, dtype=np.int64)
     for si in range(S):
-        sh = shifts[si]
         for ki in range(K):
-            f0 = f0s[si, ki]
-            acc = 0.0
-            cov = 0.0
-            wsum_pts = 0.0
-            nvalid = 0
-            nin = 0
-            for i in range(n):
-                tr = t_rel[i] + sh
-                if tr < win_lo or tr > win_hi:
-                    continue
-                nin += 1
-                w_i = pw[i]
-                ti = (tr - t_spec0) / hop
-                if ti < 0.0 or ti > T - 1.0:
-                    continue
-                r0 = int(ti)
-                if r0 >= T - 1:
-                    r0 = T - 2
-                fr = ti - r0
-                point_ok = False
-                for hh in range(H):
-                    f = f0 * harmonics[hh] * D[i]
-                    fi = (f - f_spec0) / df
-                    if fi < 0.0 or fi > F - 1.0:
-                        continue
-                    c0 = int(fi)
-                    if c0 >= F - 1:
-                        c0 = F - 2
-                    fc = fi - c0
-                    v = (
-                        W[r0, c0] * (1 - fr) * (1 - fc)
-                        + W[r0, c0 + 1] * (1 - fr) * fc
-                        + W[r0 + 1, c0] * fr * (1 - fc)
-                        + W[r0 + 1, c0 + 1] * fr * fc
-                    )
-                    if v < CLIP_LO:
-                        v = CLIP_LO
-                    elif v > CLIP_HI:
-                        v = CLIP_HI
-                    acc += hweights[hh] * v * w_i
-                    if v > ON_RIDGE_Z:
-                        cov += hweights[hh] * w_i
-                    point_ok = True
-                if point_ok:
-                    nvalid += 1
-                    wsum_pts += w_i
-            sc = NEG
-            cv = 0.0
-            if nvalid > 0 and nin > 0 and wsum_pts > 0.0:
-                frac = nvalid / nin
-                if frac >= min_valid:
-                    sc = acc / (wsum_pts * wsum) * frac
-                cv = cov / (wsum_pts * wsum) * frac
+            sc, cv = _sweep(
+                W,
+                t_spec0,
+                hop,
+                f_spec0,
+                df,
+                t_rel,
+                D,
+                pw,
+                shifts[si],
+                f0s[si, ki],
+                win_lo,
+                win_hi,
+                harmonics,
+                hweights,
+                wsum,
+                min_valid,
+            )
             # first maximum over k (np.argmax over the flattened (K, A=1) grid)
             if ki == 0 or sc > best[si]:
                 best[si] = sc
                 best_cov[si] = cv
+                best_k[si] = ki
+    # second pass ("f0 polish", score_event_curve): a fine f0 grid around the best value for
+    # the leading shifts only; replaces the shift's best when strictly better
+    if polish_top > 0 and rel_fine.shape[0] > 0:
+        order = np.argsort(-best)
+        for q in range(min(polish_top, S)):
+            si = order[q]
+            if best[si] <= NEG:
+                continue
+            f_c = f0s[si, best_k[si]]
+            b2 = NEG
+            c2 = 0.0
+            for kk in range(rel_fine.shape[0]):
+                sc, cv = _sweep(
+                    W,
+                    t_spec0,
+                    hop,
+                    f_spec0,
+                    df,
+                    t_rel,
+                    D,
+                    pw,
+                    shifts[si],
+                    f_c * rel_fine[kk],
+                    win_lo,
+                    win_hi,
+                    harmonics,
+                    hweights,
+                    wsum,
+                    min_valid,
+                )
+                if kk == 0 or sc > b2:
+                    b2 = sc
+                    c2 = cv
+            if b2 > best[si]:
+                best[si] = b2
+                best_cov[si] = c2
     # predicted excursion at the central shift (np.interp with edge values outside)
     exc = np.nan
     mid = S // 2
@@ -384,8 +468,10 @@ def ultra_scores(  # pragma: no cover - numba
     cov_z,
     imb_lambda,
     unexplained_score,
+    rel_fine,
+    polish_top,
 ):
-    """Combined ultra-coarse score of each candidate (``LockedResult.combined`` of the reference
+    """Combined score of each candidate (``LockedResult.combined`` of the reference
     path with t0 chosen from the first explained event)."""
     B = obs.shape[0]
     E = seg.shape[1]
@@ -447,6 +533,8 @@ def ultra_scores(  # pragma: no cover - numba
                 broad_all[broad_off[e] : broad_off[e + 1]],
                 slope_floor,
                 min_valid,
+                rel_fine,
+                polish_top,
             )
             pen_exc = 0.0
             obs_r = ev_plateau[e]
@@ -482,10 +570,14 @@ def ultra_scores(  # pragma: no cover - numba
     return out
 
 
-class UltraBatchScorer:
-    """Prepared inputs for :func:`ultra_scores` from an engine context (built once per search)."""
+class BatchScorer:
+    """Prepared inputs for :func:`ultra_scores` from an engine context (built once per stage).
 
-    def __init__(self, ctx, cfg) -> None:
+    ``ultra=True`` reproduces the ultra-coarse screen (curves of at most 150 samples, at least
+    2 s apart); ``ultra=False`` the coarse stage (at most 600 samples, at least the engine's
+    curve step), including its f0 polish pass."""
+
+    def __init__(self, ctx, cfg, ultra: bool = True) -> None:
         from aerodoppler.search.score import f0_grid
 
         spec = ctx.spec
@@ -523,7 +615,11 @@ class UltraBatchScorer:
             ),
             exc_window=np.full(len(feats), 60.0),
             half=half,
-            dt=np.maximum(2.0, 2.0 * half / 150.0),
+            dt=(
+                np.maximum(2.0, 2.0 * half / 150.0)
+                if ultra
+                else np.maximum(float(ctx.curve_dt_s), 2.0 * half / 600.0)
+            ),
             ridge_t=np.concatenate(rt) if rt else np.empty(0),
             ridge_f=np.concatenate(rf) if rf else np.empty(0),
             ridge_off=np.asarray(roff, dtype=np.int64),
@@ -537,10 +633,17 @@ class UltraBatchScorer:
         self.hweights = np.asarray(cfg.harmonic_weights[: len(cfg.harmonics)], dtype=np.float64)
         self.cfg = cfg
         self.c = float(ctx.c.c_mps)
-        if tuple(cfg.alphas) != (0.0,) or cfg.f0_polish_step_fraction > 0 or cfg.t0_fit != "event1":
-            raise ValueError(
-                "the batched screen implements alphas=(0,), no polish, t0 from event 1"
+        if tuple(cfg.alphas) != (0.0,) or cfg.t0_fit != "event1":
+            raise ValueError("the batched scorer implements alphas=(0,) and t0 from event 1")
+        if cfg.f0_polish_step_fraction > 0 and cfg.f0_polish_top_shifts > 0:
+            n_f = int(
+                np.ceil(cfg.f0_polish_span * cfg.f0_step_fraction / cfg.f0_polish_step_fraction)
             )
+            self.rel_fine = (1.0 + cfg.f0_polish_step_fraction) ** np.arange(-n_f, n_f + 1)
+            self.polish_top = int(cfg.f0_polish_top_shifts)
+        else:
+            self.rel_fine = np.empty(0)
+            self.polish_top = 0
 
     def score(
         self,
@@ -594,4 +697,6 @@ class UltraBatchScorer:
             float(cfg.coverage_penalty_z),
             float(cfg.imbalance_lambda),
             float(unexplained_score),
+            self.rel_fine,
+            self.polish_top,
         )

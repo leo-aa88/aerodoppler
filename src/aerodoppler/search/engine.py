@@ -582,6 +582,8 @@ class SearchEngine:
             harmonics=tuple(q.harmonics[:3]),
             harmonic_weights=tuple([1.0, 0.8, 0.6][: len(q.harmonics[:3])]),
             alphas=(0.0,),
+            f0_polish_span=q.coarse_polish_span,
+            f0_polish_top_shifts=8 if q.coarse_polish_span > 0 else 0,
         )
         ctx = EngineContext(
             spec,
@@ -645,9 +647,9 @@ class SearchEngine:
             if use_batch:
                 import numba
 
-                from aerodoppler.search.batch import UltraBatchScorer
+                from aerodoppler.search.batch import BatchScorer
 
-                scorer = UltraBatchScorer(ctx, ctx.ultra_cfg)
+                scorer = BatchScorer(ctx, ctx.ultra_cfg, ultra=True)
                 offsets = _t0_candidates(ctx, 0.0, True, True)
                 numba.set_num_threads(max(1, min(n_workers, numba.config.NUMBA_NUM_THREADS)))
             while done < n_pool:
@@ -758,8 +760,34 @@ class SearchEngine:
             )
         # ---- coarse scoring -------------------------------------------------------------
         t_c = time.perf_counter()
-        coarse_results = self._parallel_scores(ctx, coarse_idx, coarse=True, workers=q.workers)
-        coarse_scores = np.array([r.combined if r is not None else -9.0 for r in coarse_results])
+        if q.batched_screen and not extra_events and coarse_idx:
+            import numba
+
+            from aerodoppler.search.batch import BatchScorer
+
+            n_w = q.workers or max(1, mp.cpu_count() - 1)
+            numba.set_num_threads(max(1, min(n_w, numba.config.NUMBA_NUM_THREADS)))
+            objs = [assignments[i] for i in coarse_idx]
+            t0c_c = (
+                np.array([a.t0_center for a in objs])
+                if ctx.mode == SearchMode.UNKNOWN_TIME
+                else np.full(len(objs), float(ctx.t0_known))
+            )
+            sc_c = BatchScorer(ctx, ctx.coarse_cfg, ultra=False).score(
+                grid.observer_ecef[np.array([a.point_idx for a in objs])],
+                np.array([a.seg_idx for a in objs], dtype=np.int64),
+                np.array([a.tau for a in objs]),
+                t0c_c,
+                _t0_candidates(ctx, 0.0, True, False),
+                UNEXPLAINED_EVENT_SCORE,
+            )
+            coarse_scores = np.full(len(assignments), -9.0)
+            coarse_scores[np.asarray(coarse_idx)] = sc_c
+        else:
+            coarse_results = self._parallel_scores(ctx, coarse_idx, coarse=True, workers=q.workers)
+            coarse_scores = np.array(
+                [r.combined if r is not None else -9.0 for r in coarse_results]
+            )
         self.counters.append(
             StageCounter(
                 stage="coarse_scoring",

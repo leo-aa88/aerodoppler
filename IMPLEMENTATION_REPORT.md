@@ -796,6 +796,25 @@ Results (replays of the baseline requests):
 * Remaining: the coarse stage (149 s) now dominates W2; W3 still screens only ~23 % of its
   candidates within the budget. Next: batch the coarse and fine stages the same way.
 
+### Search performance 2026-11-10 — batched coarse stage, coarse f0 polish width (observed)
+
+Same workloads and replay method as above (8 workers; W1, W2 and W4 = the 35 searches with a
+complete baseline; W3 stops at its screen budget and cannot be compared exactly).
+
+1. **Batched coarse stage.** `search/batch.py` now also scores the coarse stage (3 harmonics,
+   1.5 % f0 steps, 2 s clock shifts, curves of at most 600 samples) including its f0 polish pass
+   (the 8 best clock shifts re-swept in 0.04 % f0 steps, replaced only when strictly better),
+   in threads instead of the process pool. Parity with the reference path on random candidates
+   at full and half polish width: `tests/unit/test_batch_scoring.py` (atol 10⁻⁹). The reference
+   path remains (`batched_screen=False`, and for multi-event hypotheses). New setting
+   `coarse_polish_span` (polish range in coarse f0 steps each side; 1.0 = unchanged).
+
+   Replays: identical answers in 35/35 (W1 4/4, W2 2/2, W4 29/29). Coarse-stage time, sum per
+   workload, reference → batched: W2 326.7 → 327.2 s, W1 85.9 → 80.1 s, W4 18.9 → 10.5 s.
+   **No speedup on W2:** the f0 polish (8 shifts × 77 f0 values per event) is ~80 % of the coarse
+   arithmetic, and the reference path already ran it in the numba kernel. W2 totals with the
+   batched screen and coarse stage: 324.3 / 245.9 s, peak 2,242 / 2,091 MB.
+
 ### Final test summary (observed, final code)
 
 ```

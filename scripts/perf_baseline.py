@@ -10,6 +10,7 @@ version can be checked for identical results.
         --livermore data/raw/zenodo_23424278 --datasets adsblol_2026-05-17_c432e6e8,adsblol_2026-05-16_c432e6e8
 
 W1  SYNTHETIC cases base_snr10 and many_distractors (Mode A and B)
+SYN the full SYNTHETIC benchmark (every case of ``aerodoppler benchmark``)
 W2  semi-synthetic real-trajectory cases deland_s1 and n2920w8115_s1 (central Florida,
     dataset adsblol_2026-11-02_1e2f2f08, ~1,250 segments)
 W3  semi-synthetic real-trajectory case in Manhattan (dataset adsblol_2026-11-04_262826ac,
@@ -106,6 +107,13 @@ def main() -> int:
     ap.add_argument("--datasets", default="")
     ap.add_argument("--request", default=None, help="R: request.json of an earlier search")
     ap.add_argument("--replay", default=None, help="perf_baseline.json whose searches to re-run")
+    ap.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        help="replay: quality_settings override KEY=VALUE (repeatable), e.g. coarse_polish_span=0.5",
+    )
+    ap.add_argument("--only", default="", help="replay: comma-separated workloads, e.g. W1,W2,W4")
     a = ap.parse_args()
 
     from aerodoppler.config import get_settings
@@ -121,7 +129,9 @@ def main() -> int:
         print(m, file=sys.stderr, flush=True)
 
     if a.replay:
-        return _replay(s, Path(a.replay), out, a.workers, log)
+        sets = {k: json.loads(v) for k, v in (x.split("=", 1) for x in a.set)}
+        only = {w for w in a.only.split(",") if w}
+        return _replay(s, Path(a.replay), out, a.workers, log, sets, only)
     for w in [x.strip() for x in a.workloads.split(",") if x.strip()]:
         t0 = time.time()
         if w == "W1":
@@ -129,6 +139,8 @@ def main() -> int:
                 c for c in B.SYNTHETIC_CASES if c["name"] in ("base_snr10", "many_distractors")
             ]
             res = B.run_synthetic_benchmark(s, out / w, cases=cases, workers=a.workers, log=log)
+        elif w == "SYN":
+            res = B.run_synthetic_benchmark(s, out / w, workers=a.workers, log=log)
         elif w == "W2":
             res = B.run_real_trajectory_benchmark(
                 s,
@@ -191,7 +203,7 @@ def main() -> int:
     return 0
 
 
-def _replay(s, baseline: Path, out: Path, workers: int, log) -> int:
+def _replay(s, baseline: Path, out: Path, workers: int, log, sets=None, only=None) -> int:
     from aerodoppler.geo.coordinates import haversine_m
     from aerodoppler.jobs.runner import run_search_inline
     from aerodoppler.jobs.store import Store
@@ -199,17 +211,21 @@ def _replay(s, baseline: Path, out: Path, workers: int, log) -> int:
 
     base = json.loads(baseline.read_text())
     report: dict[str, Any] = {"replay_of": str(baseline), "searches": []}
+    report["overrides"] = sets or {}
     for b in base["searches"]:
+        if only and b["workload"] not in only:
+            continue
         req_path = s.runs_dir / b["job_id"] / "request.json"
         if not req_path.exists():
             log(f"[perf] {b['job_id']}: no request.json, skipped")
             continue
         req = SearchRequest.model_validate_json(req_path.read_text())
+        upd = dict(sets or {})
         if workers:
+            upd["workers"] = workers
+        if upd:
             req = req.model_copy(
-                update={
-                    "quality_settings": req.quality_settings.model_copy(update={"workers": workers})
-                }
+                update={"quality_settings": req.quality_settings.model_copy(update=upd)}
             )
         t0 = time.time()
         err = None
