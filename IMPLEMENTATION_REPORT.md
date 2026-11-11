@@ -900,6 +900,98 @@ Results:
   given (86.75 s and 376 s) are not the pair the scenario chose (≈ 255 s and ≈ 1,603 s; 20
   audible flights), so this is event selection, not search capacity.
 
+### Event-pair selection 2026-11-11 — Manhattan answers 20 m (observed)
+
+**Diagnosis (W3, stored recording).** Ridge points of each event were matched to the simulated
+flights' received-frequency tracks. Neither event the automatic selector gave the search is an
+aircraft pass:
+
+* `b0f1` (centre 86.75 s): 942 of 961 points follow the 2nd harmonic of a5fa9f, but the event
+  window [−1, 239] s ends before that flight's closest approach (300.6 s). It is the approach
+  only, with an implied radial speed of 9.3 m/s.
+* `a1ef` (376 s): 493 points from aa8548 and 253 from aae374, two aircraft merged into one
+  ridge (harmonics 4, 5, 10, 15, 20, 23, 25, 30). The plateaus are not reached.
+
+Both outranked the complete passes because the ranking (detection quality × harmonics ×
+√ridge length) rewards long, harmonic-rich ridges. Given two clean events instead (`abb5` at
+563.8 s → ada936, CPA 565.6 s; `51ee` at 758.0 s → a4caf6, CPA 756.8 s), the same search
+answers **20 m** from the true observer, with both flights correct. It is graded low: margin
+0.19 z, and `search_complete` fails because that pair has 55.9 M Mode A pairs, above the 50 M
+cap.
+
+**Change.** `looks_like_a_pass(event)` holds when the event is `plausible_doppler`, both
+plateaus are reached, the implied radial speed is ≥ 20 m/s (the search's 25 m/s floor less 20 %
+plateau error) and the ridge has exactly one descent. `pick_event_pair` and `pick_events` now
+rank such events before all others, keeping the previous ranking within each group. When no
+event qualifies, the ranking is unchanged.
+
+Only the synthetic and real-trajectory benchmarks, the demo, the hard negatives and the blind
+benchmark call these selectors. User searches use the events the operator chose, and the
+Livermore benchmark picks its single event by overlap with the published ridge, so neither is
+affected.
+
+Across all stored benchmark recordings (12 SYN, W1 ×2, W2 ×2, W3), only W3's pair changes,
+to exactly `[abb5, 51ee]`. W3 has 9 pass-like events out of 51.
+
+**Paired before/after on fresh SEMI-SYNTHETIC scenes** (real trajectories, simulated audio,
+10 dB). Each case has one scene and one detection; both selectors are applied to the same
+events. The search runs on the new pair, and also on the old pair when the two differ
+(unknown-time mode, 8 workers). The cases are Manhattan (midtown_w, seed 1, 2026-11-04 data)
+plus 12 Florida sites × seeds 1 and 2 (2026-11-02 data). Two sites (n2930w8155, both seeds)
+had no suitable scenario pair, which leaves 23 searched cases. 11 searches of the first pass
+were lost to the inline CPU-budget bug (below) and rerun one case per process; the
+fresh-scene pairing is kept, because each rerun scored both selectors on one new scene.
+
+| case | events (pass-like) | old pair | new pair |
+|---|---|---|---|
+| midtown_w_s1 (Manhattan) | 51 (10) | 10,806.2 m, low, flights wrong | **19.8 m, medium, flights right** |
+| ormond_s1 | 24 (2) | 7,621.3 m, low, flights wrong | 47.0 m, low, flights wrong (a2f0fc twice) |
+| ormond_s2 | 37 (1) | 14,996.7 m, low, flights wrong | 10,908.3 m, low, flights wrong |
+| deland_s2 | 19 (2) | 15.0 m, low, flights right | 36.1 m, medium, flights right |
+| n2880w8145_s2 | 9 (2) | 13.9 m, medium, flights right | 80.7 m, high, flights right |
+| 18 other cases | — | same pair, identical result | |
+
+Over the 23 cases, answers within 100 m went from 7 to 9 (also 7 → 9 within 300 m). The median error went from 13,258.2 to 12,073.6 m. No wrong
+answer was graded above low with either selector.
+
+14 of the 23 cases are 10–20 km off with both selectors (13 with an unchanged pair, plus
+ormond_s2), all graded low. Their top-1 explanations are mostly flights the recording never
+heard (a5c4d1 or a2f0fc in 9 of the 14).
+That is the pattern-work weakness in "Remaining issues" item 2, not the selector.
+
+Controls:
+
+* SYNTHETIC benchmark (`perf_baseline.py --workloads SYN`, same worktree and DEM directory as
+  `syn_after`): 24/24 identical top-1 positions and grades. Runtimes are not comparable: the
+  Florida reruns shared the machine.
+* Hard negatives: 0 of 12 negative clips gave Doppler evidence; 0 negative Doppler events;
+  true passes found 2 / 2 / 2.
+  * The positives are 7.3 / 7.3 / 19.6 m (high) in a worktree with a fresh DEM directory,
+    identical to `main` there and to `docs/negative_benchmark_2026-11-05.json`.
+  * In the development worktree the 10 dB positive gave 21.4 m. The cause is the DEM mosaic
+    described below, not the selector: each positive has exactly two usable events, so both
+    selectors return the same pair.
+
+**Found on the way.**
+
+1. **Inline CPU budget.** Inline jobs counted the CPU time of the whole process since it
+   started, so after 12 CPU-hours every later search in a long benchmark failed seconds after
+   starting. The caller was also told "cancelled by operator". Fixed separately in PR #16.
+2. **Overlapping synthetic DEM tiles.**
+   * `open_dem_for_bbox` builds one mosaic from every local tile that intersects the box, and
+     the first tile in sorted order wins where tiles overlap. Every synthetic scenario writes
+     `synthetic_<name>.tif` over the same box (39.82–40.18 N, 74.75–75.25 W) with its own
+     seed. A search therefore uses the terrain of the alphabetically first synthetic tile in
+     the directory, not its own scene's.
+   * At the 10 dB positive's observer, the 17 synthetic tiles in the development worktree give
+     106.0–134.7 m. The scene's own tile gives 115.0 m; the tile the search used
+     (`synthetic_adsb_gap_b.tif`) gives 122.0 m.
+   * Synthetic benchmark numbers therefore depend on which tiles the data directory holds.
+     Comparisons in this report were made within one directory.
+   * A real recording searched in that box (near Trenton, NJ) would also get SYNTHETIC terrain,
+     marked only by a `synthetic_dem` candidate flag.
+   * Not fixed here (see "Remaining issues" item 11).
+
 ### Final test summary (observed, final code)
 
 ```
@@ -957,6 +1049,11 @@ passed when run with network access (`uv run pytest -m network` → 1 passed, 22
     single-pass clips is 3 cases, all the right aircraft, worst 466 m — but 18 answered cases
     cannot calibrate anything, and the two new rules were chosen with these cases in view. A
     blind multi-pass real set (roadmap M8) is the only way to test them honestly.
+11. **Synthetic DEM tiles overlap.** Every synthetic scenario writes its own tile over the same
+    box, and the DEM mosaic uses the first one in sorted order. Synthetic searches can
+    therefore run on another scene's terrain (up to ~30 m different at the observer), and a
+    real search in that box (near Trenton, NJ) would get synthetic terrain with only a flag.
+    See "Event-pair selection 2026-11-11".
 
 ## Next executable actions
 
