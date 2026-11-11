@@ -67,7 +67,7 @@ Every stage records candidate counts. Candidates are **ordered**, not cut: Mode 
 Mode B matches are sorted by a cheap *consistency prior* — the slant-distance prior
 `|log(r_geom / d_est)|` per event with `d_est = f_c v² / (c |df/dt|)` from the flight's actual
 CPA speed, plus the ridge-slope and aircraft-class terms — and the screen consumes them in that
-order (see the funnel below). `quality_settings.max_assignments` (20 M) is only a memory guard;
+order (see the funnel below). `quality_settings.max_assignments` (50 M) is only a memory guard;
 when it bites, the most consistent are kept, a warning is attached and the search is reported
 incomplete. More flight segments than `max_segments` (20,000) make the search refuse with a
 request to narrow the area or time, instead of silently keeping the longest segments.

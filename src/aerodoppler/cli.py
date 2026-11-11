@@ -15,7 +15,7 @@ from pathlib import Path
 import typer
 
 from aerodoppler.config import get_settings
-from aerodoppler.models import BBox
+from aerodoppler.models import BBox, QualitySettings
 
 app = typer.Typer(
     help="AeroDoppler: consent-based aircraft-Doppler acoustic geolocation (local-first).",
@@ -890,7 +890,7 @@ def benchmark(
         help="events per Mode A search in --real-trajectories (2 = pair; >2 = multi-event, experimental)",
     ),
     max_assignments: int = typer.Option(
-        20_000_000,
+        QualitySettings.model_fields["max_assignments"].default,
         "--max-assignments",
         help="memory guard on Mode A pairs per search (the most consistent are kept when exceeded; the search is then reported incomplete)",
     ),
