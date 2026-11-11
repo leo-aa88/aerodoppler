@@ -267,9 +267,8 @@ def test_attach_extra_events_explains_matching_flight_only():
     # sparse CPA entries at grid point 5: segment 7 passes at tau = t0 + 400 (match), segment 8 at t0 + 480 (no match)
     t0 = 1_000_000.0
     sp = SparseCPA(
-        np.array([7, 8, 7]),
-        np.array([5, 5, 6]),
-        np.zeros(3),
+        np.array([7, 8, 7], dtype=np.int32),
+        np.array([5, 5, 6], dtype=np.int32),
         np.array([1500.0, 1500.0, 1500.0]),
         np.array([t0 + 400.0, t0 + 480.0, t0 + 400.0]),
         np.array([60.0, 60.0, 60.0]),

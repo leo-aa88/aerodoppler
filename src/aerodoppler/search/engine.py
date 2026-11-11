@@ -636,7 +636,8 @@ class SearchEngine:
             t_u = time.perf_counter()
             n_workers = q.workers or max(1, mp.cpu_count() - 1)
             batch = q.screen_batch or max(20_000, 4000 * n_workers)
-            scores_all: list[float] = []
+            # scores in pool order (an array: 20 M Python floats in a list took ~0.6 GB)
+            scores_arr = np.full(n_pool, -9.0)
             batch_best: list[float] = []
             done = 0
             stopped_by = "complete"
@@ -657,21 +658,19 @@ class SearchEngine:
                 if use_batch:
                     sl = slice(done, min(done + batch, n_pool))
                     n_b = sl.stop - sl.start
-                    t0c = (
-                        pool.t0_center[sl]
-                        if ctx.mode == SearchMode.UNKNOWN_TIME
-                        else np.full(n_b, float(ctx.t0_known))
-                    )
+                    p_idx, seg_b, tau_b, _sl, t0c, _pr = pool.rows(sl)
+                    if ctx.mode != SearchMode.UNKNOWN_TIME:
+                        t0c = np.full(n_b, float(ctx.t0_known))
                     sc = scorer.score(
-                        grid.observer_ecef[pool.point_idx[sl]],
-                        pool.seg[sl],
-                        pool.tau[sl],
+                        grid.observer_ecef[p_idx],
+                        seg_b,
+                        tau_b,
                         t0c,
                         offsets,
                         UNEXPLAINED_EVENT_SCORE,
-                    ).tolist()
-                    scores_all.extend(sc)
-                    batch_best.append(float(max(sc)) if sc else -9.0)
+                    )
+                    scores_arr[sl] = sc
+                    batch_best.append(float(sc.max()) if n_b else -9.0)
                     done += n_b
                     self._stage("ultra_coarse_progress", done=done, total=n_pool)
                     if done < n_pool and time.perf_counter() - t_u > q.screen_budget_s:
@@ -682,7 +681,7 @@ class SearchEngine:
                 res = self._parallel_scores(ctx, idx, coarse=True, workers=q.workers, ultra=True)
                 sc = [res[i].combined if res[i] is not None else -9.0 for i in idx]
                 del res
-                scores_all.extend(sc)
+                scores_arr[done : done + len(sc)] = sc
                 batch_best.append(float(max(sc)) if sc else -9.0)
                 done += len(idx)
                 # release the objects of candidates that can no longer reach the kept top: only
@@ -690,7 +689,7 @@ class SearchEngine:
                 # candidates held as objects took several GB on the Manhattan workload)
                 alive = np.concatenate([alive, np.asarray(idx, dtype=np.int64)])
                 if len(alive) > 2 * q.ultra_keep_top:
-                    sc_alive = np.asarray(scores_all)[alive]
+                    sc_alive = scores_arr[alive]
                     # same total order as the final selection below: score, then prior order
                     top = np.lexsort((alive, -sc_alive))[: q.ultra_keep_top]
                     keep_mask = np.zeros(len(alive), dtype=bool)
@@ -702,7 +701,7 @@ class SearchEngine:
                 if done < n_pool and time.perf_counter() - t_u > q.screen_budget_s:
                     stopped_by = "budget"
                     break
-            ultra_scores = np.array(scores_all)
+            ultra_scores = scores_arr[:done]
             order_u = np.lexsort((np.arange(len(ultra_scores)), -ultra_scores))
             coarse_idx = [int(i) for i in order_u[: q.ultra_keep_top] if ultra_scores[i] > -5]
             if use_batch:

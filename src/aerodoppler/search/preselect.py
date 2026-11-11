@@ -27,6 +27,7 @@ from aerodoppler.models import BBox, StageCounter
 from aerodoppler.physics.doppler import closest_approach_batch
 from aerodoppler.search.events import EventFeatures
 
+PAIR_BLOCK = 4_000_000  # Mode A pairs materialised at a time (bounds the temporaries)
 CLASS_PRIOR = {"piston": 0.0, "turboprop": 0.0, "helicopter": -0.1, "unknown": -0.1, "jet": -0.4}
 MIC_HEIGHT_M = 1.5
 
@@ -56,14 +57,21 @@ class GridWithElevation:
 
 @dataclass
 class SparseCPA:
-    """CPA results restricted to grid points within the slant bounds of one segment."""
+    """CPA results restricted to grid points within the slant bounds of one segment.
 
-    seg_idx: NDArray[np.int64]
-    point_idx: NDArray[np.int64]
-    t_emit: NDArray[np.float64]
+    Indices are int32 (32 bytes per entry in all): on dense traffic this table holds tens of
+    millions of entries, and the candidate pool refers into it instead of copying it."""
+
+    seg_idx: NDArray[np.int32]
+    point_idx: NDArray[np.int32]
     slant: NDArray[np.float64]
     tau: NDArray[np.float64]  # delayed CPA (reception time)
     speed: NDArray[np.float64]
+
+    @classmethod
+    def empty(cls) -> SparseCPA:
+        z = np.empty(0)
+        return cls(np.empty(0, np.int32), np.empty(0, np.int32), z, z.copy(), z.copy())
 
 
 @dataclass
@@ -86,61 +94,68 @@ class TooManySegments(ValueError):
 class AssignmentPool:
     """Every candidate hypothesis, best physical-consistency prior first, as compact arrays.
 
-    ``Assignment`` objects are created only for the slice being scored (:meth:`take`), so the
-    pool can hold millions of candidates; the search scores them in this order until its budget
-    is spent and reports how far it got (anytime search, see SearchEngine). ``cost`` is the
-    consistency prior (sum over events of |log(slant / slant implied by the Doppler slope)|;
-    lower = more consistent) — a priority, not a score bound."""
+    A candidate is one sparse-CPA entry per event (``ent``, int32 when the table allows), so
+    the pool costs 8 bytes per event plus its prior instead of copies of point, segments,
+    times and distances; :meth:`rows` gathers those for a slice (identical values).
+    ``Assignment`` objects are created only for the candidates being scored (:meth:`take`),
+    so the pool can hold tens of millions of candidates; the search scores them in this order
+    until its budget is spent and reports how far it got (anytime search, see SearchEngine).
+    ``cost`` is the consistency prior (sum over events of |log(slant / slant implied by the
+    Doppler slope)|; lower = more consistent) — a priority, not a score bound. The recording
+    clock origin is ``tau of event 1 - centre of event 1`` (Mode A) or the known start (Mode B)."""
 
-    point_idx: np.ndarray
-    seg: np.ndarray  # (n, k)
-    tau: np.ndarray  # (n, k)
-    slant: np.ndarray  # (n, k)
-    t0_center: np.ndarray
-    class_prior: np.ndarray
+    sp: SparseCPA
+    ent: np.ndarray  # (n, k) sparse-CPA entry per event
     cost: np.ndarray
+    seg_prior: np.ndarray  # class prior per segment
+    event1_centre_s: float = 0.0  # Mode A: t0 = tau_1 - centre_1
+    t0_known: float | None = None  # Mode B: t0 is the known start for every candidate
 
     def __len__(self) -> int:
-        return int(len(self.point_idx))
+        return int(len(self.ent))
+
+    def rows(self, sel: slice | np.ndarray) -> tuple[np.ndarray, ...]:
+        """(point_idx, seg, tau, slant, t0_center, class_prior) of the selected candidates."""
+        e = self.ent[sel]
+        sp = self.sp
+        point_idx = sp.point_idx[e[:, 0]].astype(np.int64)
+        seg = sp.seg_idx[e].astype(np.int64)
+        tau = sp.tau[e]
+        slant = sp.slant[e]
+        if self.t0_known is not None:
+            t0c = np.full(len(e), float(self.t0_known))
+        else:
+            t0c = tau[:, 0] - self.event1_centre_s
+        prior = self.seg_prior[seg].mean(axis=1)
+        return point_idx, seg, tau, slant, t0c, prior
 
     def take(self, a: int, b: int) -> list[Assignment]:
-        return [
-            Assignment(
-                int(self.point_idx[i]),
-                tuple(int(x) for x in self.seg[i]),
-                tuple(float(x) for x in self.tau[i]),
-                tuple(float(x) for x in self.slant[i]),
-                float(self.t0_center[i]),
-                float(self.class_prior[i]),
-            )
-            for i in range(a, min(b, len(self)))
-        ]
+        return self._objects(slice(a, min(b, len(self))))
 
     def take_indices(self, idx: np.ndarray) -> list[Assignment]:
+        return self._objects(np.asarray(idx, dtype=np.int64))
+
+    def _objects(self, sel: slice | np.ndarray) -> list[Assignment]:
+        point_idx, seg, tau, slant, t0c, prior = self.rows(sel)
         return [
             Assignment(
-                int(self.point_idx[i]),
-                tuple(int(x) for x in self.seg[i]),
-                tuple(float(x) for x in self.tau[i]),
-                tuple(float(x) for x in self.slant[i]),
-                float(self.t0_center[i]),
-                float(self.class_prior[i]),
+                int(point_idx[i]),
+                tuple(int(x) for x in seg[i]),
+                tuple(float(x) for x in tau[i]),
+                tuple(float(x) for x in slant[i]),
+                float(t0c[i]),
+                float(prior[i]),
             )
-            for i in idx
+            for i in range(len(point_idx))
         ]
 
     @classmethod
     def empty(cls, k: int) -> AssignmentPool:
-        z = np.zeros(0)
-        return cls(
-            z.astype(np.int64),
-            np.zeros((0, k), np.int64),
-            np.zeros((0, k)),
-            np.zeros((0, k)),
-            z,
-            z,
-            z,
-        )
+        return cls(SparseCPA.empty(), np.zeros((0, k), np.int32), np.zeros(0), np.zeros(0))
+
+
+def _index_dtype(n: int) -> type:
+    return np.int32 if n < np.iinfo(np.int32).max else np.int64
 
 
 def _slope_prior(sp: SparseCPA, idx: np.ndarray, f: EventFeatures, c_mps: float) -> np.ndarray:
@@ -319,7 +334,7 @@ def sparse_cpa(
     one ``(v_min, v_max, d_min, d_max)`` per event — an entry is kept only if at least one
     event could use it, which is exactly the filter every consumer applies afterwards."""
     t0 = time.perf_counter()
-    parts: list[tuple[np.ndarray, ...]] = []
+    parts: list[list[np.ndarray | None]] = []
     X_all = grid.observer_ecef
     n_eval = 0
     n_in_bounds = 0
@@ -346,16 +361,25 @@ def sparse_cpa(
             sel, v = sel[keep], v[keep]
             if sel.size == 0:
                 continue
-        parts.append((np.full(len(sel), si), near[sel], te[sel], r[sel], tau[sel], v))
-    if not parts:
-        empty = np.empty(0)
-        res = SparseCPA(
-            np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64), empty, empty, empty, empty
+        parts.append(
+            [
+                np.full(len(sel), si, dtype=np.int32),
+                near[sel].astype(np.int32),
+                r[sel],
+                tau[sel],
+                v,
+            ]
         )
+    if not parts:
+        res = SparseCPA.empty()
     else:
-        res = SparseCPA(*(np.concatenate([p[i] for p in parts]) for i in range(6)))  # type: ignore[arg-type]
-        res.seg_idx = res.seg_idx.astype(np.int64)
-        res.point_idx = res.point_idx.astype(np.int64)
+        # one field at a time, dropping the parts of each field once joined (peak memory)
+        cols = []
+        for i in range(5):
+            cols.append(np.concatenate([p[i] for p in parts]))
+            for p in parts:
+                p[i] = None
+        res = SparseCPA(*cols)
     n_all = len(segments) * len(grid.grid)
     note = (
         f"slant in [{d_min:.0f}, {d_max:.0f}] m; {n_eval} of {n_all} segment-point pairs "
@@ -420,15 +444,29 @@ def mode_a_pairs(
     if len(a_idx) == 0 or len(b_idx) == 0:
         counters.append(_counter("mode_a_pairs", 0, 0, t1, "no entries pass the event bounds"))
         return AssignmentPool.empty(2)
+    # every array below is as long as the CPA table (tens of millions of entries on dense
+    # traffic): build each in place and drop it as soon as it is used (peak memory)
+    idt = _index_dtype(len(sp.tau))
+    del ok1, ok2
     tbase = float(np.min(sp.tau))
-    key_b = sp.point_idx[b_idx].astype(np.float64) * 1e6 + (sp.tau[b_idx] - tbase)
+    key_b = sp.point_idx[b_idx].astype(np.float64)
+    key_b *= 1e6
+    key_b += sp.tau[b_idx] - tbase
     order = np.argsort(key_b)
-    key_b_sorted = key_b[order]
-    b_sorted = b_idx[order]
-    key_a = sp.point_idx[a_idx].astype(np.float64) * 1e6 + (sp.tau[a_idx] - tbase)
-    lo = np.searchsorted(key_b_sorted, key_a + delta_t_s - tol_s, side="left")
-    hi = np.searchsorted(key_b_sorted, key_a + delta_t_s + tol_s, side="right")
-    counts = hi - lo
+    key_b = key_b[order]  # sorted keys
+    b_sorted = b_idx[order].astype(idt)
+    del order, b_idx
+    key_a = sp.point_idx[a_idx].astype(np.float64)
+    key_a *= 1e6
+    key_a += sp.tau[a_idx] - tbase
+    q = key_a + delta_t_s
+    q -= tol_s
+    lo = np.searchsorted(key_b, q, side="left")
+    q = key_a + delta_t_s
+    q += tol_s
+    counts = np.searchsorted(key_b, q, side="right")
+    del q, key_a, key_b
+    counts -= lo
     n_pairs_total = int(counts.sum())
     if n_pairs_total == 0:
         counters.append(
@@ -437,16 +475,39 @@ def mode_a_pairs(
             )
         )
         return AssignmentPool.empty(2)
-    # materialise all (ia, ib) pairs without a Python loop
-    rep_a = np.repeat(np.arange(len(a_idx)), counts)
-    offsets = np.arange(n_pairs_total) - np.repeat(np.cumsum(counts) - counts, counts)
-    ia = a_idx[rep_a]
-    ib = b_sorted[np.repeat(lo, counts) + offsets]
-    same = sp.seg_idx[ia] == sp.seg_idx[ib]
-    ia, ib = ia[~same], ib[~same]
-    n_valid = len(ia)
-    note = f"Δt={delta_t_s:.1f}s ± {tol_s:.1f}s; {int(same.sum())} same-flight pairs removed"
-    cost = _slope_prior(sp, ia, f1, c_mps) + _slope_prior(sp, ib, f2, c_mps)
+    # materialise the (ia, ib) pairs block by block over the event-1 entries (vectorised, with
+    # temporaries bounded by the block) into arrays sized for every pair
+    a_idx = a_idx.astype(idt)
+    cum = np.cumsum(counts)
+    ia = np.empty(n_pairs_total, dtype=idt)
+    ib = np.empty(n_pairs_total, dtype=idt)
+    cost = np.empty(n_pairs_total)
+    n_valid = 0
+    start = 0
+    while start < len(a_idx):
+        done_before = int(cum[start - 1]) if start else 0
+        end = int(np.searchsorted(cum, done_before + PAIR_BLOCK, side="right"))
+        end = min(max(end, start + 1), len(a_idx))
+        c = counts[start:end]
+        n_c = int(c.sum())
+        if n_c:
+            offsets = np.arange(n_c) - np.repeat(np.cumsum(c) - c, c)
+            ja = a_idx[np.repeat(np.arange(start, end), c)]
+            jb = b_sorted[np.repeat(lo[start:end], c) + offsets]
+            keep = sp.seg_idx[ja] != sp.seg_idx[jb]
+            ja, jb = ja[keep], jb[keep]
+            m = len(ja)
+            ia[n_valid : n_valid + m] = ja
+            ib[n_valid : n_valid + m] = jb
+            cost[n_valid : n_valid + m] = _slope_prior(sp, ja, f1, c_mps) + _slope_prior(
+                sp, jb, f2, c_mps
+            )
+            n_valid += m
+        start = end
+    del a_idx, b_sorted, lo, counts, cum
+    n_same = n_pairs_total - n_valid
+    ia, ib, cost = ia[:n_valid], ib[:n_valid], cost[:n_valid]
+    note = f"Δt={delta_t_s:.1f}s ± {tol_s:.1f}s; {n_same} same-flight pairs removed"
     order = np.argsort(cost, kind="stable")
     if n_valid > max_assignments:
         # memory guard only: the pool is scored in prior order within a time budget anyway
@@ -457,16 +518,18 @@ def mode_a_pairs(
             "(shrink the area or the time window for a complete search)"
         )
         note += f"; memory guard {n_valid} -> {max_assignments} by consistency prior"
-    ia, ib, cost = ia[order], ib[order], cost[order]
-    seg_prior = np.array([s.class_prior for s in segments])
+    ent = np.empty((len(order), 2), dtype=idt)
+    ent[:, 0] = ia[order]
+    ent[:, 1] = ib[order]
+    del ia, ib
+    cost = cost[order]
+    del order
     pool = AssignmentPool(
-        point_idx=sp.point_idx[ia].astype(np.int64),
-        seg=np.stack([sp.seg_idx[ia], sp.seg_idx[ib]], axis=1).astype(np.int64),
-        tau=np.stack([sp.tau[ia], sp.tau[ib]], axis=1),
-        slant=np.stack([sp.slant[ia], sp.slant[ib]], axis=1),
-        t0_center=sp.tau[ia] - f1.t_center_s,
-        class_prior=0.5 * (seg_prior[sp.seg_idx[ia]] + seg_prior[sp.seg_idx[ib]]),
-        cost=cost,
+        sp,
+        ent,
+        cost,
+        np.array([s.class_prior for s in segments]),
+        event1_centre_s=float(f1.t_center_s),
     )
     counters.append(
         _counter(
@@ -516,8 +579,7 @@ def mode_b_matches(
     points = set(per_event[0].keys())
     for d in per_event[1:]:
         points &= set(d.keys())
-    rows: list[list[int]] = []
-    pts: list[int] = []
+    rows: list[list[int]] = []  # every entry of a row is at the same grid point
     for p in sorted(points):
         combos: list[list[int]] = [[]]
         for d in per_event:
@@ -528,7 +590,6 @@ def mode_b_matches(
                 if sp.seg_idx[i] not in {sp.seg_idx[j] for j in c}
             ]
         rows.extend(combos)
-        pts.extend([p] * len(combos))
     if not rows:
         counters.append(
             _counter("mode_b_matches", n_entries, 0, t0, "no point matches every event")
@@ -545,15 +606,12 @@ def mode_b_matches(
         )
         order = order[:max_assignments]
     ent, cost = ent[order], cost[order]
-    seg_prior = np.array([s.class_prior for s in segments])
     pool = AssignmentPool(
-        point_idx=np.array(pts, dtype=np.int64)[order],
-        seg=sp.seg_idx[ent].astype(np.int64),
-        tau=sp.tau[ent],
-        slant=sp.slant[ent],
-        t0_center=np.full(len(ent), float(t0_known)),
-        class_prior=seg_prior[sp.seg_idx[ent]].mean(axis=1),
-        cost=cost,
+        sp,
+        ent.astype(_index_dtype(len(sp.tau))),
+        cost,
+        np.array([s.class_prior for s in segments]),
+        t0_known=float(t0_known),
     )
     counters.append(_counter("mode_b_matches", n_entries, len(pool), t0, note))
     return pool
