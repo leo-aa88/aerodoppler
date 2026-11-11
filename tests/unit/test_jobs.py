@@ -403,3 +403,48 @@ def test_inline_job_frees_slots_held_by_dead_inline_jobs(tmp_path):
     job, _ = run_inline(s, "diagnostic", {"seconds": 0.2}, wait_s=60.0)
     assert job.status == "succeeded" and time.time() - t0 < 40
     assert {j.status for j in q.list(types=["diagnostic"]) if j.id != job.id} == {"interrupted"}
+
+
+def _burn_cpu(seconds: float) -> None:
+    t0 = time.process_time()
+    x = 0
+    while time.process_time() - t0 < seconds:
+        x += 1
+
+
+def test_cpu_budget_counts_only_the_jobs_own_cpu_time(tmp_path):
+    """Regression: the watchdog summed the CPU time of the whole process since it started, so
+    in a long benchmark or script every inline job after ~12 CPU-hours failed seconds after
+    starting with "CPU-time budget exceeded". Children that already exited still count."""
+    import multiprocessing as mp
+
+    from aerodoppler.jobs import worker as W
+
+    _burn_cpu(1.5)  # earlier work of this process
+    q = _q(tmp_path)
+    _submit(q, mem=900.0, max_cpu_s=1.0)  # mem: the test process itself must fit (PSS)
+    j = q.claim_next(CAP)
+    job = q.start(j.id, j.worker_token, os.getpid(), None, "h")
+    sup = W.Supervisor(q, job, Settings(data_dir=tmp_path, offline=True), j.worker_token)
+    assert sup.max_cpu_s == 1.0
+    assert sup.resources()["cpu_s"] < 0.5
+    sup.beat()
+    assert not sup.cancel.is_set()
+    p = mp.get_context("fork").Process(target=_burn_cpu, args=(1.2,))
+    p.start()
+    p.join()
+    assert sup.resources()["cpu_s"] >= 1.0  # the exited child's CPU time is the job's
+    sup.beat()
+    assert sup.cancel.is_set() and sup.reason.startswith("CPU-time budget exceeded")
+
+
+def test_inline_job_stopped_by_a_budget_raises_its_reason(tmp_path):
+    """The caller of an inline job saw "cancelled by operator" for a budget stop; the
+    exception now carries the same reason as the job row."""
+    from aerodoppler.jobs.queue import JobCancelled
+    from aerodoppler.jobs.service import run_inline
+
+    s = Settings(data_dir=tmp_path, offline=True)
+    s.ensure_dirs()
+    with pytest.raises(JobCancelled, match="memory budget exceeded"):
+        run_inline(s, "diagnostic", {"seconds": 15, "reserve_mb": 1, "allocate_mb": 300})
