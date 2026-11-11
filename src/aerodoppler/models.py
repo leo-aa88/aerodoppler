@@ -248,7 +248,8 @@ class QualitySettings(BaseModel):
     ultra_keep_top: int = 40_000  # pairs surviving the ultra-coarse screen (all pairs scored)
     ultra_t0_step_s: float = 4.0
     max_segments: int = 20_000  # memory guard: above it the search refuses (no silent subset)
-    max_assignments: int = 20_000_000  # candidates held as arrays; memory guard only
+    # candidates held as arrays (24 bytes each with their screen score); memory guard only
+    max_assignments: int = 50_000_000
     screen_budget_s: float = 1800.0  # wall-clock budget of the anytime screen (prior order)
     screen_batch: int = 0  # candidates per screening batch; 0 = max(20000, 4000 x workers)
     # numba batch scorer for the screen and the coarse stage (False = reference path)

@@ -856,6 +856,50 @@ complete baseline; W3 stops at its screen budget and cannot be compared exactly)
      is independent of this setting. This is empirical equivalence on the workloads above, not
      a guarantee for every recording; `coarse_polish_span=1.0` restores the previous behaviour.
 
+### Search memory 2026-11-11 — Manhattan becomes exhaustive (observed)
+
+**Profile of W3 on main (ec729d7, 8 workers).** The batched screen had never been run on W3;
+the "~23 % of the candidates" above was the reference screen (2,411 candidates/s). On main
+the screen scored all 20 M candidates in 1,166 s (17,153/s); total 1,280 s, peak 10,195 MB,
+graded low. What still made the search incomplete was the memory guard: 33,650,123 Mode A
+pairs, of which only the 20 M with the best consistency prior were kept, so the
+`search_complete` gate failed ("NOT exhaustive"). Inside the batch kernel (one 60,000-candidate
+batch, 15 threads, 22,902/s): predicted curves ~3 % of the time, the ridge-implied f0 estimate
+(median per clock shift) ~41 %, the spectrogram sweep ~56 %, so a log-frequency plane (which
+only speeds up the sweep) was not pursued. Memory by stage (RSS): segments 1.6 GB, CPA table
++3.5 GB (37.5 M entries), pairs +1.6 GB (80 bytes per pair), screen scores held as a Python list
++0.6 GB. A 0.5 s sampler of the process tree showed the true peak inside the pairing (7.75 GB
+with 33.65 M pairs: table-length temporaries), which the stage logs never saw.
+
+Changes (all exact):
+
+1. The candidate pool stores one sparse-CPA entry index per event plus its prior (16 bytes per
+   pair instead of 80); point, segments, reception times, slants, clock origin and class prior
+   are gathered per batch (`AssignmentPool.rows`). The CPA table uses int32 indices and drops
+   the unused emission time (48 → 32 bytes per entry), joined one field at a time.
+2. Mode A pairs are built block by block into preallocated arrays, and every table-length
+   temporary of the pairing is dropped as soon as it is used. Test: the pool equals the one-shot
+   construction it replaced (values, order, cap), at block sizes 7, 1,000 and 4 M.
+3. Screen scores in a NumPy array instead of a list.
+4. `max_assignments` 20 M → 50 M (24 bytes per candidate with its screen score); the CLI and the
+   benchmark take the default from `QualitySettings` instead of repeating it.
+
+Results:
+
+* Replays of the 35 complete-baseline searches (W1, W2, W4; requests keep their saved cap of
+  20 M): candidates, scores and gate texts identical to the PR #14 code in 35/35. W2 peaks
+  1,578 / 2,003 → 1,446 / 1,851 MB.
+* W3 at the old 20 M cap (8 workers): identical candidates, scores and gates to main; in-process
+  RSS at the end of the coarse stage 8,020 → 4,784 MB; peak tree PSS 10,195 → 8,161 MB (before
+  change 2).
+* **W3 at the 50 M cap, final code, 15 workers: all 33,650,123 pairs scored in 1,424 s
+  (23,631/s); `search_complete` passes; total 1,519 s; peak 5,744 MB** (sampler: 3,141 MB up to
+  the CPA table, 5,447 MB during pairing, 5,542 MB during the screen). Change 2 cut the pairing
+  peak from 7,751 to 5,452 MB on the same request.
+* W3 still answers 14.2 km from the true observer (graded low). The two events the search was
+  given (86.75 s and 376 s) are not the pair the scenario chose (≈ 255 s and ≈ 1,603 s; 20
+  audible flights), so this is event selection, not search capacity.
+
 ### Final test summary (observed, final code)
 
 ```

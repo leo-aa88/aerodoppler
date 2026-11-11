@@ -304,7 +304,7 @@ def run_real_trajectory_benchmark(
     seeds: tuple[int, ...] = (1,),
     snr_db: float = 10.0,
     log=print,
-    max_assignments: int = 20_000_000,
+    max_assignments: int = QualitySettings.model_fields["max_assignments"].default,
     events_k: int = 2,
     oracle_events: bool = False,
 ) -> dict[str, Any]:
