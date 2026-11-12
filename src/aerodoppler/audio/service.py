@@ -488,14 +488,57 @@ def spectrogram_payload(
     }
 
 
+# An automatically chosen event should be one aircraft passing by: the search places its delayed
+# closest approach at the event's steepest point and reads speed and distance bounds from its
+# plateaus. In dense traffic the longest, most harmonic-rich ridges are often something else:
+# the approach of one aircraft only (no closest approach inside the window; a reached-plateau
+# ratio implying a radial speed far below any flight speed) or two aircraft merged into one
+# ridge (plateaus not reached, several descents).
+PASS_MIN_RADIAL_SPEED_MPS = 20.0  # the search's 25 m/s speed floor less 20 % plateau error
+
+
+def looks_like_a_pass(e: DopplerEvent) -> bool:
+    """One complete pass: measured Doppler evidence (``plausible_doppler``) with both plateaus
+    reached, a single steep descent, and a plateau ratio implying at least
+    ``PASS_MIN_RADIAL_SPEED_MPS`` of radial speed."""
+    from aerodoppler.search.events import assess_event
+
+    a = assess_event(e)
+    m = a.get("metrics") or {}
+    return (
+        a.get("label") == "plausible_doppler"
+        and bool(m.get("plateaus_reached"))
+        and (m.get("implied_radial_speed_mps") or 0.0) >= PASS_MIN_RADIAL_SPEED_MPS
+        and _descents(e) == 1
+    )
+
+
+def _descents(e: DopplerEvent) -> int:
+    """Number of distinct steep-descent episodes (a clean flyby has exactly one)."""
+    t = np.array([p.relative_t_s for p in e.ridge_points])
+    f = np.array([p.frequency_hz for p in e.ridge_points])
+    if len(t) < 20:
+        return 1
+    k = max(3, int(round(10.0 / max(float(np.median(np.diff(t))), 0.05))) | 1)
+    fs = np.convolve(np.pad(f, (k // 2, k // 2), mode="edge"), np.ones(k) / k, mode="valid")
+    slope = np.gradient(fs, t)
+    if np.min(slope) >= 0:
+        return 1
+    steep = slope < 0.3 * float(np.min(slope))
+    edges = np.flatnonzero(np.diff(np.concatenate([[0], steep.astype(int), [0]])))
+    return max(1, len(edges) // 2)
+
+
 def pick_event_pair(
     events: list[DopplerEvent], min_separation_s: float = 60.0
 ) -> list[DopplerEvent]:
     """Choose the two most credible events with clearly distinct time windows (for Mode A).
 
-    Ranking: detection quality × number of harmonics seen × ridge length. The second event must
-    have its steepest point at least ``min_separation_s`` away from the first. Returns the
-    chosen events sorted by time (fewer than two if no such pair exists).
+    Events that look like one complete aircraft pass (:func:`looks_like_a_pass`) are ranked
+    before all others; within each group the ranking is detection quality × number of
+    harmonics seen × ridge length. The second event must have its steepest point at least
+    ``min_separation_s`` away from the first. Returns the chosen events sorted by time (fewer
+    than two if no such pair exists).
     """
     from aerodoppler.audio.ridges import estimate_f0_at_steepest  # noqa: F401  (same module family)
 
@@ -509,23 +552,8 @@ def pick_event_pair(
         i, drop = robust_descent_centre(t, f)
         return float(t[i]) if drop > 0 else 0.5 * (e.audio_start_s + e.audio_end_s)
 
-    def descents(e: DopplerEvent) -> int:
-        """Number of distinct steep-descent episodes (a clean flyby has exactly one)."""
-        t = np.array([p.relative_t_s for p in e.ridge_points])
-        f = np.array([p.frequency_hz for p in e.ridge_points])
-        if len(t) < 20:
-            return 1
-        k = max(3, int(round(10.0 / max(float(np.median(np.diff(t))), 0.05))) | 1)
-        fs = np.convolve(np.pad(f, (k // 2, k // 2), mode="edge"), np.ones(k) / k, mode="valid")
-        slope = np.gradient(fs, t)
-        if np.min(slope) >= 0:
-            return 1
-        steep = slope < 0.3 * float(np.min(slope))
-        edges = np.flatnonzero(np.diff(np.concatenate([[0], steep.astype(int), [0]])))
-        return max(1, len(edges) // 2)
-
     def weight(e: DopplerEvent) -> float:
-        shape = 1.0 / descents(e)  # merged multi-aircraft ridges are penalised
+        shape = 1.0 / _descents(e)  # merged multi-aircraft ridges are penalised
         return (
             (0.2 + e.detection_quality)
             * len(e.candidate_harmonic_numbers)
@@ -533,7 +561,7 @@ def pick_event_pair(
             * shape
         )
 
-    ranked = sorted(events, key=weight, reverse=True)
+    ranked = sorted(events, key=lambda e: (not looks_like_a_pass(e), -weight(e)))
     if not ranked:
         return []
     first = ranked[0]
@@ -577,7 +605,7 @@ def pick_events(
 
     chosen = list(pair)
     centres = [centre(e) for e in chosen]
-    for e in sorted(events, key=weight, reverse=True):
+    for e in sorted(events, key=lambda e: (not looks_like_a_pass(e), -weight(e))):
         if len(chosen) >= k:
             break
         if any(e.id == c.id for c in chosen) or e.detection_quality < 0.3:

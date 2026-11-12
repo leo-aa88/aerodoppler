@@ -196,3 +196,70 @@ def test_template_detector_finds_weak_flyby():
     assert abs(best.f_c_hz - 95.0) / 95.0 < 0.08
     ev = flyovers_to_events(spec, [best], "r")[0]
     assert len(ev.ridge_points) > 100 and ev.detection_method == "template-fit"
+
+
+def _pass_like(t0, f0, v, dur=240.0, d=800.0, c=343.0, approach_only=False, second=None):
+    """Ridge points of a straight constant-speed pass (received frequency, no noise); optionally
+    only the approach, or followed by a second pass that starts on the first's last plateau."""
+    from aerodoppler.models import DopplerEvent, RidgePoint
+
+    t = np.arange(0.0, dur, 0.25)
+    tc = dur * (0.95 if approach_only else 0.5)
+
+    def received(tt, tcc, f):
+        x = v * (tt - tcc)
+        v_toward = -v * x / np.sqrt(x**2 + d**2)
+        return f * c / (c - v_toward)
+
+    f = received(t, tc, f0)
+    if approach_only:  # only the first 40 % of a pass whose CPA lies after the ridge ends
+        keep = t <= 0.4 * dur
+        t, f = t[keep], received(t[keep], 0.5 * dur + 150.0, f0)
+    if second is not None:
+        t2 = t[-1] + 0.25 + np.arange(0.0, dur, 0.25)
+        f2 = received(t2, t2[0] + dur / 2, f[-1] * (c + v) / c * second)
+        t, f = np.concatenate([t, t2]), np.concatenate([f, f2])
+    pts = [
+        RidgePoint(relative_t_s=float(t0 + a), frequency_hz=float(b), uncertainty_hz=0.5)
+        for a, b in zip(t, f, strict=True)
+    ]
+    return DopplerEvent(
+        id=f"e{t0}",
+        recording_id="r",
+        audio_start_s=float(t0 + t[0]),
+        audio_end_s=float(t0 + t[-1]),
+        ridge_points=pts,
+        candidate_harmonic_numbers=[1, 2, 3],
+        detection_quality=0.6,
+    )
+
+
+def test_a_complete_pass_looks_like_a_pass_and_fragments_do_not():
+    from aerodoppler.audio.service import looks_like_a_pass
+    from aerodoppler.search.events import assess_event
+
+    assert looks_like_a_pass(_pass_like(0, 100.0, 60.0))
+    assert looks_like_a_pass(_pass_like(0, 100.0, 30.0, d=500.0))  # a slow helicopter pass
+    assert not looks_like_a_pass(_pass_like(0, 100.0, 60.0, approach_only=True))
+    assert not looks_like_a_pass(_pass_like(0, 100.0, 60.0, second=1.0))  # two passes merged
+    # a complete-looking descent whose plateaus imply ~8 m/s (as the approach fragment of a
+    # Manhattan helicopter did: 9.3 m/s): measured as Doppler, but no aircraft the search
+    # accepts (speed floor 25 m/s) can explain it
+    slow = _pass_like(0, 100.0, 8.0, d=150.0)
+    assert assess_event(slow)["label"] == "plausible_doppler"
+    assert not looks_like_a_pass(slow)
+
+
+def test_pick_event_pair_prefers_complete_passes_over_richer_fragments():
+    from aerodoppler.audio.service import pick_event_pair
+
+    good_a = _pass_like(100, 100.0, 60.0)
+    good_b = _pass_like(900, 120.0, 55.0)
+    # the fragments carry more harmonics and quality: the old ranking chose them first
+    frag = _pass_like(500, 110.0, 60.0, approach_only=True)
+    merged = _pass_like(1500, 90.0, 60.0, second=1.0)
+    for e in (frag, merged):
+        e.candidate_harmonic_numbers = list(range(1, 9))
+        e.detection_quality = 0.95
+    pair = pick_event_pair([frag, merged, good_a, good_b])
+    assert [e.id for e in pair] == ["e100", "e900"]
