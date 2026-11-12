@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { JOB_ACTIVE, api, errText, followJob, type Job, type JobsOverview } from "@/lib/api";
 
 const TYPE_LABEL: Record<string, string> = {
@@ -296,8 +296,8 @@ export default function JobsPage() {
           </thead>
           <tbody>
             {(data?.jobs ?? []).map((j) => (
-              <>
-                <tr key={j.id} className={open === j.id ? "selected" : ""}>
+              <Fragment key={j.id}>
+                <tr className={open === j.id ? "selected" : ""}>
                   <td>
                     <b>{TYPE_LABEL[j.type] ?? j.type}</b>
                     <div className="small muted">
@@ -357,7 +357,7 @@ export default function JobsPage() {
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             ))}
             {!data?.jobs.length && (
               <tr>
