@@ -55,6 +55,27 @@ def backoff_s(attempt: int, base_s: float = RETRY_BASE_S) -> float:
     return min(RETRY_MAX_S, base_s * 2 ** max(0, attempt - 1))
 
 
+def process_tree_cpu_s() -> float:
+    """CPU seconds used so far by this process, its live descendants and the children it has
+    already waited for (pool workers that exited keep counting)."""
+    import psutil
+
+    cpu = 0.0
+    try:
+        p = psutil.Process()
+        t = p.cpu_times()
+        cpu = t.user + t.system + t.children_user + t.children_system
+        for q in p.children(recursive=True):
+            try:
+                t = q.cpu_times()
+                cpu += t.user + t.system
+            except psutil.Error:
+                pass
+    except psutil.Error:
+        pass
+    return cpu
+
+
 class Supervisor:
     """Heartbeat + budget watchdog for a running job (used by workers and inline runs)."""
 
@@ -70,25 +91,16 @@ class Supervisor:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         params = job.params or {}
         self.max_cpu_s = float(params.get("max_cpu_s") or settings.jobs_max_cpu_hours * 3600.0)
+        # CPU time is counted from here: an inline job runs in a process (CLI, benchmark, script)
+        # that may already have spent hours on earlier jobs
+        self._cpu_base = process_tree_cpu_s()
 
     def resources(self) -> dict[str, Any]:
-        import psutil
-
         from aerodoppler.resources import disk_free_bytes, tree_pss_mb
 
         pss = tree_pss_mb()
         self.peak_pss = max(self.peak_pss, pss)
-        cpu = 0.0
-        try:
-            p = psutil.Process()
-            for q in [p, *p.children(recursive=True)]:
-                try:
-                    t = q.cpu_times()
-                    cpu += t.user + t.system
-                except psutil.Error:
-                    pass
-        except psutil.Error:
-            pass
+        cpu = max(0.0, process_tree_cpu_s() - self._cpu_base)
         return {
             "pss_mb": round(pss, 1),
             "peak_pss_mb": round(self.peak_pss, 1),

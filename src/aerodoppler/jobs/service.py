@@ -220,6 +220,8 @@ def run_inline(
             error_message=reason,
             resources=sup.resources(),
         )
+        if reason != str(e):  # the caller sees why, as the job row does
+            raise JobCancelled(reason) from e
         raise
     except JobError as e:
         queue.finish(

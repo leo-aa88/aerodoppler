@@ -54,7 +54,8 @@ cancelled                    interrupted (or queued again: resume-safe types, at
 3. **Run.** The scheduler spawns `python -m aerodoppler.jobs.worker <id> <token>` in its own
    process session. The worker starts only if the random token of the claim still matches,
    renews a 30 s lease every 5 s (heartbeat thread), and records memory (PSS of its whole process
-   tree), CPU time and free disk. It stops cooperatively when cancelled, when its CPU-time budget
+   tree), CPU time (counted from the job's start, children that already exited included) and
+   free disk. It stops cooperatively when cancelled, when its CPU-time budget
    (`AERODOPPLER_JOBS_MAX_CPU_HOURS`) or the free-disk floor (`AERODOPPLER_JOBS_MIN_FREE_DISK_MB`)
    is exceeded, or when it uses more than 1.5× its memory reservation (a worker that does not
    stop within 10 s of a memory overrun ends its own process group). Imports and searches also
