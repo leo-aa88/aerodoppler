@@ -375,3 +375,36 @@ def test_batched_and_reference_screens_give_the_same_search(world):
             res.confidence_grade,
         )
     assert out[True] == out[False]
+
+
+def test_search_uses_its_own_scenes_synthetic_dem(world):
+    """Regression: every synthetic scene writes its own terrain tile over the same box, and
+    the search used whichever sorted first. Another scene's tile that sorts first must neither
+    serve the search nor be needed to find the scene's own one."""
+    from aerodoppler.geo.dem import make_synthetic_dem
+
+    w = world
+    truth = w["sc"].truth
+    own = w["sc"].dem_path
+    assert w["sc"].dataset.manifest()["dem_tile"] == own.name
+    decoy = make_synthetic_dem(
+        w["spec"].bbox, w["settings"].dem_dir / "synthetic_aaa_decoy.tif", seed=999
+    )
+    assert sorted(w["settings"].dem_dir.glob("*.tif"))[0] == decoy
+    try:
+        req = SearchRequest(
+            mode=SearchMode.KNOWN_TIME,
+            recording_id=w["rec"].id,
+            event_ids=[w["events"][0].id],
+            start_utc=unix_to_iso(truth["recording_start_unix"] + 3.0),
+            start_uncertainty_s=5.0,
+            bbox=w["spec"].bbox,
+            flight_dataset_ids=[w["sc"].dataset.dataset_id],
+            operator_authorized=True,
+            quality_settings=QualitySettings(workers=4),
+        )
+        res = run_search_inline(w["store"], w["settings"], req)
+        dem = res.manifest["dem"]
+        assert dem["synthetic"] and [p.rsplit("/", 1)[-1] for p in dem["tiles"]] == [own.name]
+    finally:
+        decoy.unlink()

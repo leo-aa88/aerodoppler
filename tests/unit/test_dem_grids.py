@@ -66,3 +66,66 @@ def test_usgs_3dep_and_copernicus_online(tmp_path: Path):
     ps = fetch_copernicus_glo30(bb, tmp_path / "cop")
     d2 = GeoTiffDEM(ps).elevation([29.05], [-81.15]).elevation_m[0]
     assert abs(d1 - d2) < 5.0 and 0 < d1 < 60
+
+
+def _real_tile(path: Path, bbox: BBox, elevation_m: float) -> Path:
+    """A plain (untagged, i.e. not SYNTHETIC) flat GeoTIFF."""
+    import rasterio
+    from rasterio.transform import from_bounds
+
+    w = h = 40
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=h,
+        width=w,
+        count=1,
+        dtype="float32",
+        crs="EPSG:4326",
+        transform=from_bounds(bbox.west, bbox.south, bbox.east, bbox.north, w, h),
+    ) as ds:
+        ds.write(np.full((h, w), elevation_m, np.float32), 1)
+    return path
+
+
+def _elev(dem) -> float:
+    return float(dem.elevation([40.0], [-75.0]).elevation_m[0])
+
+
+def test_real_searches_never_use_synthetic_tiles(tmp_path: Path):
+    """Regression: every synthetic scene writes a tile over the same box and the mosaic used
+    whichever sorted first, also for a real recording searched there."""
+    make_synthetic_dem(BB, tmp_path / "a_synthetic.tif", seed=1)
+    with pytest.raises(DEMError, match="SYNTHETIC tile"):
+        open_dem_for_bbox(tmp_path, BB, offline=True)
+    _real_tile(tmp_path / "z_real.tif", BB, 55.0)
+    dem = open_dem_for_bbox(tmp_path, BB, offline=True)
+    assert not dem.synthetic and _elev(dem) == pytest.approx(55.0)
+
+
+def test_a_synthetic_search_uses_exactly_its_own_tile(tmp_path: Path):
+    a = make_synthetic_dem(BB, tmp_path / "synthetic_a.tif", seed=1)
+    b = make_synthetic_dem(BB, tmp_path / "synthetic_b.tif", seed=2)
+    want_b = _elev(GeoTiffDEM([b]))
+    assert abs(_elev(GeoTiffDEM([a])) - want_b) > 0.5  # the two scenes' terrains differ here
+    dem = open_dem_for_bbox(tmp_path, BB, offline=True, synthetic_tile="synthetic_b.tif")
+    assert dem.synthetic and _elev(dem) == pytest.approx(want_b)
+    # without a declaration two overlapping synthetic tiles are an error, not a guess
+    with pytest.raises(DEMError, match="2 SYNTHETIC DEM tiles overlap"):
+        open_dem_for_bbox(tmp_path, BB, offline=True, allow_synthetic=True)
+    a.unlink()
+    only_b = open_dem_for_bbox(tmp_path, BB, offline=True, allow_synthetic=True)
+    assert _elev(only_b) == pytest.approx(want_b)
+
+
+def test_a_declared_synthetic_tile_must_exist_be_synthetic_and_cover(tmp_path: Path):
+    with pytest.raises(DEMError, match="missing"):
+        open_dem_for_bbox(tmp_path, BB, offline=True, synthetic_tile="nope.tif")
+    _real_tile(tmp_path / "real.tif", BB, 10.0)
+    with pytest.raises(DEMError, match="not tagged SYNTHETIC"):
+        open_dem_for_bbox(tmp_path, BB, offline=True, synthetic_tile="real.tif")
+    small = BBox(west=-75.1, south=39.95, east=-75.0, north=40.0)
+    make_synthetic_dem(small, tmp_path / "small.tif")
+    with pytest.raises(DEMError, match="does not cover"):
+        open_dem_for_bbox(tmp_path, BB, offline=True, synthetic_tile="small.tif")

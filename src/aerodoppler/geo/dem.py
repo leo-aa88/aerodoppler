@@ -348,35 +348,77 @@ def make_synthetic_dem(
     return out_path
 
 
+def _is_synthetic_tile(path: Path) -> bool:
+    with rasterio.open(path) as ds:
+        return ds.tags().get("AERODOPPLER_SYNTHETIC") == "true"
+
+
 def open_dem_for_bbox(
-    dem_dir: Path, bbox: BBox, prefer: str = "auto", offline: bool = False
+    dem_dir: Path,
+    bbox: BBox,
+    prefer: str = "auto",
+    offline: bool = False,
+    *,
+    synthetic_tile: str | None = None,
+    allow_synthetic: bool = False,
 ) -> GeoTiffDEM:
-    """Find or fetch DEM coverage for a bbox: local tiles first, then 3DEP (US), then Copernicus."""
+    """Find or fetch DEM coverage for a bbox: local tiles first, then 3DEP (US), then Copernicus.
+
+    Tiles tagged SYNTHETIC are never used for real data: every synthetic scene writes its own
+    rolling terrain over the same box, and a mosaic would hand a search whichever tile sorts
+    first. ``synthetic_tile`` (the file name a synthetic flight dataset declares) selects exactly
+    that tile. Without one, ``allow_synthetic`` lets a synthetic search use a synthetic tile only
+    when no real tile covers the box and exactly one synthetic tile does; several overlapping
+    synthetic tiles are an error, not a guess.
+    """
+    if synthetic_tile is not None:
+        path = dem_dir / Path(synthetic_tile).name
+        dem = GeoTiffDEM([path], source="synthetic")
+        if not dem.synthetic:
+            raise DEMError(
+                f"{path} is declared as a scene's synthetic DEM but is not tagged SYNTHETIC"
+            )
+        if not dem.covers(bbox):
+            raise DEMError(
+                f"the scene's synthetic DEM {path} does not cover bbox {bbox.as_tuple()}"
+            )
+        return dem
     tiles = sorted(dem_dir.glob("*.tif")) if dem_dir.exists() else []
-    if tiles:
-        # use only tiles that intersect the bbox so that unrelated (e.g. synthetic demo) tiles
-        # neither serve points nor taint the provenance flags
-        covering = []
-        for p in tiles:
-            try:
-                with rasterio.open(p) as ds:
-                    b = ds.bounds
-                if (
-                    b.left <= bbox.east
-                    and b.right >= bbox.west
-                    and b.bottom <= bbox.north
-                    and b.top >= bbox.south
-                ):
-                    covering.append(p)
-            except Exception:
-                continue
-        if covering:
-            try:
-                dem = GeoTiffDEM(covering, source="local_geotiff")
-                if dem.covers(bbox):
-                    return dem
-            except DEMError:
-                pass
+    real: list[Path] = []
+    synthetic: list[Path] = []
+    for p in tiles:
+        # use only tiles that intersect the bbox so that unrelated tiles neither serve points
+        # nor taint the provenance flags
+        try:
+            with rasterio.open(p) as ds:
+                b = ds.bounds
+            if (
+                b.left <= bbox.east
+                and b.right >= bbox.west
+                and b.bottom <= bbox.north
+                and b.top >= bbox.south
+            ):
+                (synthetic if _is_synthetic_tile(p) else real).append(p)
+        except Exception:
+            continue
+    if real:
+        try:
+            dem = GeoTiffDEM(real, source="local_geotiff")
+            if dem.covers(bbox):
+                return dem
+        except DEMError:
+            pass
+    if allow_synthetic and synthetic:
+        if len(synthetic) > 1:
+            raise DEMError(
+                f"{len(synthetic)} SYNTHETIC DEM tiles overlap bbox {bbox.as_tuple()} "
+                f"({', '.join(p.name for p in synthetic)}) and the flight data does not say which "
+                "one belongs to its scene. Regenerate the scene (its dataset then names its "
+                "tile) or remove the other synthetic tiles."
+            )
+        dem = GeoTiffDEM(synthetic, source="synthetic")
+        if dem.covers(bbox):
+            return dem
     in_conus = (
         -125.5 <= bbox.west and bbox.east <= -66.0 and 24.0 <= bbox.south and bbox.north <= 49.5
     )
@@ -397,6 +439,11 @@ def open_dem_for_bbox(
             )
         except (DEMError, OSError) as e:
             errors.append(str(e))
+    if synthetic and not allow_synthetic:
+        errors.append(
+            f"{len(synthetic)} SYNTHETIC tile(s) cover this box but are never used for real data "
+            f"({', '.join(p.name for p in synthetic)})"
+        )
     raise DEMError(
         "no DEM available for bbox "
         + str(bbox.as_tuple())

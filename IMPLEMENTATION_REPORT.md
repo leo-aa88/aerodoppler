@@ -990,7 +990,81 @@ Controls:
      Comparisons in this report were made within one directory.
    * A real recording searched in that box (near Trenton, NJ) would also get SYNTHETIC terrain,
      marked only by a `synthetic_dem` candidate flag.
-   * Not fixed here (see "Remaining issues" item 11).
+   * Fixed on 2026-11-16; see "Synthetic DEM isolation 2026-11-16" below.
+
+### Synthetic DEM isolation 2026-11-16 (observed)
+
+**Change.**
+
+* A synthetic scene's flight dataset manifest now names its own terrain tile (`"dem_tile":
+  "synthetic_<name>.tif"`).
+* A search on synthetic flight data opens exactly that tile. It is a `DEMError` if the tile is
+  missing, is not tagged SYNTHETIC, or does not cover the search box.
+* A search over datasets that name different tiles is refused (`SearchInputError`): they belong
+  to different scenes.
+* A search on real flight data never uses a SYNTHETIC tile. If only synthetic tiles cover the
+  box, the error names them instead of using them.
+* Synthetic flight data without a `dem_tile` (stored before this change) still works with a
+  single synthetic tile. With several overlapping tiles it is a `DEMError` asking to regenerate
+  the scene.
+* Other callers of `open_dem_for_bbox` (real-trajectory and blind benchmarks, CLI geo
+  commands) keep the defaults, so they use real terrain only.
+
+**Before/after.** Both runs are SYNTHETIC. Each used an installed wheel (`main` at `ed14c14`
+vs this branch; `git_sha` is null in the JSON because a wheel has no git checkout) and its
+own empty data directory. Each ran `benchmark --workers 8`, then `benchmark --negatives
+--workers 8`, then `demo`. In the `main` run, every search's DEM manifest lists all synthetic
+tiles written so far: 1 for the first case, 12 for the last benchmark case and 17 for the demo.
+With the fix, each lists only the scene's own tile.
+
+The ground elevation used for the top candidate changed accordingly. On `main` it was
+117.41–122.52 m in every search, because the first tile in sorted order won. With the fix it
+ranges 105.98–134.72 m. For the demo, the scene's truth is 114.96 m: `main` used 122.01 m
+(Mode A) and the fix used 114.97 m.
+
+Synthetic benchmark (`docs/synthetic_benchmark_2026-11-16.json`). The 18 searches not listed
+are identical: same top-1 error, same grade.
+
+| case | mode | `main` | fix |
+|---|---|---|---|
+| short_sep_300 | A | 31.2 m, high | 29.9 m, high |
+| long_sep_1100 | A | 37.2 m, medium | **7.3 m**, medium |
+| long_sep_1100 | B | 31.2 m, high | **7.3 m**, high |
+| drifting_rpm | A | 19.6 m, high | 35.0 m, high |
+
+* Mode A median 31.2 → 30.5 m; p90 45.0 → 45.0 m; max 53.0 → 53.0 m.
+* Mode B median 7.3 → 7.3 m; p90 31.2 → 30.2 m; max 69.9 → 69.9 m.
+* Both modes: 12/12 answered, 12/12 within 300 m, 0 false matches, 12/12 correct flight pairs.
+* Grades are identical in all 24 searches.
+* The drifting_rpm Mode A error grew from 19.6 to 35.0 m with the correct terrain. The fix
+  does not improve every case; it removes a dependence on which other scenes are on disk.
+
+Hard negatives (`docs/negative_benchmark_2026-11-16.json`):
+
+* Identical negatives: 0 of 12 clips gave Doppler evidence, 0 negative Doppler events, and
+  true passes found 2 / 2 / 2.
+* Positives went from 21.4 / 7.3 / 19.6 m (all high) to **7.3** / 7.3 / 19.6 m (all high).
+  The 21.4 m found during the event-pair work came from the mosaic. The fixed result matches
+  `docs/negative_benchmark_2026-11-05.json`, which was made in a fresh DEM directory.
+
+Demo:
+
+* Mode A: 7.3 m, high, on both.
+* Mode B: 128.2 → **73.0 m**, low on both.
+
+Runtimes are not compared; the two runs shared the machine.
+
+Earlier synthetic numbers in this report were measured with the mosaic. They are comparable
+only within one data directory, as noted in "Event-pair selection 2026-11-11".
+
+Tests:
+
+* Three unit tests in `tests/unit/test_dem_grids.py` fail on the old code. They cover: real
+  searches never use synthetic tiles; a synthetic search uses exactly its declared tile, and
+  overlapping undeclared tiles are an error; a declared tile must exist, be SYNTHETIC and cover
+  the box.
+* A slow integration test runs a search with a decoy synthetic tile that sorts first, and
+  checks that the run manifest lists only the scene's own tile.
 
 ### Final test summary (observed, final code)
 
@@ -1049,11 +1123,11 @@ passed when run with network access (`uv run pytest -m network` → 1 passed, 22
     single-pass clips is 3 cases, all the right aircraft, worst 466 m — but 18 answered cases
     cannot calibrate anything, and the two new rules were chosen with these cases in view. A
     blind multi-pass real set (roadmap M8) is the only way to test them honestly.
-11. **Synthetic DEM tiles overlap.** Every synthetic scenario writes its own tile over the same
-    box, and the DEM mosaic uses the first one in sorted order. Synthetic searches can
-    therefore run on another scene's terrain (up to ~30 m different at the observer), and a
-    real search in that box (near Trenton, NJ) would get synthetic terrain with only a flag.
-    See "Event-pair selection 2026-11-11".
+11. **Synthetic DEM tiles overlap — fixed 2026-11-16.**
+    * Synthetic searches now use exactly their own scene's tile, and real searches never use a
+      SYNTHETIC tile. See "Synthetic DEM isolation 2026-11-16".
+    * Synthetic flight datasets stored before the fix do not name their tile. If several
+      synthetic tiles overlap, searching them fails until the scene is regenerated.
 
 ## Next executable actions
 

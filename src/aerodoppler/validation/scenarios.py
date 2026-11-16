@@ -230,7 +230,11 @@ def build_scenario(
             f"scenario={spec.name}",
             f"seed={spec.seed}",
         ],
-        extra_manifest={"request": {"date_utc": spec.date_utc, "bbox": spec.bbox.as_tuple()}},
+        extra_manifest={
+            "request": {"date_utc": spec.date_utc, "bbox": spec.bbox.as_tuple()},
+            # the search uses exactly this terrain (other scenes' tiles cover the same box)
+            "dem_tile": dem_path.name,
+        },
     )
     truth.update(
         {
