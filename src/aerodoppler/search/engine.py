@@ -436,7 +436,27 @@ class SearchEngine:
                     "flat ground elevation assumed (operator supplied); terrain not modelled"
                 )
             else:
-                dem = open_dem_for_bbox(self.settings.dem_dir, bbox, offline=offline)
+                # a synthetic scene names its own terrain tile; real data never gets one
+                declared = sorted(
+                    {
+                        str(m["dem_tile"])
+                        for m in (d.manifest() for d in datasets)
+                        if m.get("synthetic") and m.get("dem_tile")
+                    }
+                )
+                if len(declared) > 1:
+                    raise SearchInputError(
+                        "the synthetic flight datasets belong to different scenes (DEM tiles "
+                        + ", ".join(declared)
+                        + "); search them separately"
+                    )
+                dem = open_dem_for_bbox(
+                    self.settings.dem_dir,
+                    bbox,
+                    offline=offline,
+                    synthetic_tile=declared[0] if declared else None,
+                    allow_synthetic=synthetic_data,
+                )
         except DEMError as e:
             raise SearchInputError(f"DEM unavailable: {e}") from e
 
