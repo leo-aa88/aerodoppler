@@ -1066,6 +1066,98 @@ Tests:
 * A slow integration test runs a search with a decoy synthetic tile that sorts first, and
   checks that the run manifest lists only the scene's own tile.
 
+### Partial-track scoring 2026-11-16 — the Florida wrong-aircraft matches (observed)
+
+**Diagnosis.** The 22 answered Florida cases of the real-trajectory benchmark were rerun on
+`main` (456695b) with oracle events: the true ridges traced as manual events, which tests the
+search alone. The results reproduce the 2026-11-04 table exactly: 12 within 300 m, 9 beyond
+1 km, median 75.2 m. Grades are 7 high, 4 medium, 11 low; 13/22 have the correct flights.
+
+Every one of the 9 wrong answers uses at least one flight whose ADS-B track spans only 0–16 % of
+an event window:
+
+* a5c4d1 is matched to both events in 3 cases (daytona_w_s1/s2, n2910w8105_s1).
+* a7009b is matched to both events in 2 cases (n2930w8125_s1/s2).
+* Non-ICAO (TIS-B) tracks `~292c76` and `~292c9e` appear in 2 cases.
+* In ormond_s1, the winner's event-1 flight exists for 10 s of a 303 s window and scores 3.76.
+  The rank-3 candidate uses a2f0fc, which exists for about 1 s of the window and scores 6.95;
+  the true flight's full pass scores 5.01.
+
+**Cause.**
+
+* The predicted curve is sampled only where the flight has track data:
+  `Trajectory.resample_times` clamps to the track, and samples across a gap beyond
+  `max_gap_s` are dropped.
+* The kernel's valid share `nvalid / nin` therefore counts only curve samples that exist. A
+  fragment that crosses the ridge is judged only where it exists and looks like a perfect
+  match.
+* The comment in `_score_kernel` already said uncovered parts of the window "count as zero";
+  the code did not do that.
+* The excursion penalty has a second, smaller hole: a curve that does not span the event centre
+  gets a predicted excursion of NaN and no penalty.
+
+**Change.**
+
+* `score.window_time_fraction` measures the share of the event window the shifted curve spans.
+  Consecutive samples more than 3 median spacings apart are a hole and do not count.
+* Both kernels multiply each event's score and coverage by that share: `score._score_kernel`
+  and the batched `batch._sweep`.
+* The "at least 50 % of the curve's points valid" gate is unchanged. A true flight whose ADS-B
+  drops out mid-pass now earns a proportionally lower score instead of being rejected.
+* The NaN excursion case is unchanged.
+
+**Before/after (oracle events, the same 22 cases).** Per-case results are in
+`docs/real_trajectory_oracle_2026-11-16.json`.
+
+| | `main` | fix |
+|---|---|---|
+| top-1 within 300 m / within 1 km / beyond 1 km | 12 / 13 / 9 | **20 / 21 / 1** |
+| top-1 median | 75.2 m | 34.8 m |
+| correct flight pair at rank 1 | 13/22 | **21/22** |
+| grades high / medium / low | 7 / 4 / 11 | 15 / 6 / 1 |
+| wrong (> 1 km) graded above low | 0 | 0 |
+| correct (≤ 300 m) graded low | 2 | 0 |
+
+* 8 of the 9 wrong cases become right with the correct aircraft, at 12.3–189.4 m: ormond_s1,
+  deland_s2, daytona_w_s1/s2, n2910w8105_s1, n2880w8125_s2 and n2930w8125_s1/s2.
+* ormond_s2 stays wrong (17.5 km, low); see "Remaining issues" item 13.
+* The 13 previously right cases give identical positions.
+* 4 of those 13 have higher grades: n2880w8145_s1 medium → high, n2900w8115_s2 medium → high,
+  n2910w8105_s2 low → high, n2940w8115_s2 low → high.
+* All 15 high answers are within 359.5 m and have the correct flights.
+* Runtimes are not compared; the runs shared the machine.
+
+Controls on the same build:
+
+* **SYNTHETIC benchmark** (baseline `docs/synthetic_benchmark_2026-11-16.json`, from the same
+  source as `main`):
+  * All 24 searches have identical top-1 errors and correct flights.
+  * One grade changed: long_sep_1100 Mode A medium → high (runner-up gap 0.42 → 1.21 z).
+  * In adsb_gap_b, whose true second flight has an ADS-B gap, the runner-up gap shrank from
+    2.07 to 1.47 z (Mode A) and from 1.19 to 0.97 z (Mode B). Both are still high and correct.
+    This is the expected cost: time without track data is no longer credited.
+* **Hard negatives:** summary identical to `docs/negative_benchmark_2026-11-16.json` (0 of 12
+  clips with Doppler evidence; positives 7.3 / 7.3 / 19.6 m, high).
+* **Demo:** identical (Mode A 7.3 m high, Mode B 73.0 m low).
+* **Livermore REAL recordings** (29 cases; `main` reproduces
+  `docs/livermore_benchmark_2026-11-05.json` exactly):
+  * 27 cases are identical.
+  * N563FX_R21, wrong aircraft at 6,733.2 m (low), now abstains (`weak_fit`).
+  * N748SP_R36, wrong aircraft at 3,389.2 m (medium), moves to 4,112.3 m (medium). That wrong
+    answer graded medium exists on `main` too.
+  * Overall: answered 18 → 17, within 300 m 8 → 8, wrong beyond 1 km 7 → 6, correct flights
+    15 → 15. Grades go from 12 low / 6 medium to 11 low / 6 medium.
+
+Not measured: the Florida cases with automatically detected events. Those combine this effect
+with event-selection failures.
+
+Test: `test_a_track_fragment_on_the_ridge_does_not_outscore_the_full_pass`
+(`tests/unit/test_locked_scoring.py`) covers three cases:
+
+* a 10 s fragment of a pass must score below 10 % of the full pass (old code: 7.14 vs 7.40);
+* a half-covering track earns 35–65 % of the full score;
+* a hole in the track is not covered time.
+
 ### Final test summary (observed, final code)
 
 ```
@@ -1105,6 +1197,10 @@ passed when run with network access (`uv run pytest -m network` → 1 passed, 22
    rescue this case; better ridge separation for overlapping aircraft and operator-curated
    events are the next steps. Pattern-work aircraft (repeated circuits) produce comb-like CPA
    sequences that match many two-event separations.
+   * 2026-11-16: with oracle events, 8 of the 9 wrong Florida answers were short track fragments
+     scored as full passes, not pattern work. They are fixed; see "Partial-track scoring
+     2026-11-16".
+   * The automatic-event cases have not been rerun since that fix.
 3. **Performance at real traffic density.** ~20 min and 3–4 GB RSS for a 36×33 km box with
    ~1,250 segments (all pairs screened). Batching the forward model across candidates and
    replacing per-candidate Python objects would give an order of magnitude; national-scale
@@ -1128,6 +1224,20 @@ passed when run with network access (`uv run pytest -m network` → 1 passed, 22
       SYNTHETIC tile. See "Synthetic DEM isolation 2026-11-16".
     * Synthetic flight datasets stored before the fix do not name their tile. If several
       synthetic tiles overlap, searching them fails until the scene is regenerated.
+12. **A lost pool worker hangs a search.**
+    * In one diagnostic run (2026-11-16) a search waited 8 h 21 min after its coarse stage.
+      7 of its 8 pool workers were gone, and the last one was idle, waiting for work.
+    * `multiprocessing.Pool` loses the task of a worker that dies, so `imap_unordered` never
+      returns, and inline searches have no stall check.
+    * The cause of the lost workers is unknown: no kernel out-of-memory message was visible, and
+      the processes were almost entirely in swap. The same case finished normally in a rerun.
+13. **ormond_s2 with oracle events is still wrong** (17.5 km, graded low) after the
+    partial-track fix.
+    * The winner's two flights both cover their event windows fully, but score weakly (1.13
+      and 2.77).
+    * The true pair (ab402b, ac25b7) is not in the top 3. Both true tracks are flagged
+      `mixed_altitude_datum` (minimum altitudes −30 m and −38 m, circuits at an airport). Not
+      investigated further.
 
 ## Next executable actions
 

@@ -25,6 +25,44 @@ from aerodoppler.physics.trajectory import Trajectory
 CLIP_LO = -2.0
 CLIP_HI = 8.0
 ON_RIDGE_Z = 1.5
+# consecutive curve samples further apart than this many median spacings are a hole in the
+# track (a sample gap beyond Trajectory.max_gap_s), not covered time
+HOLE_SPACINGS = 3.0
+
+
+def curve_gap_tolerance(t_rel: NDArray[np.float64]) -> float:
+    """Receive-time spacing above which two consecutive curve samples are a hole."""
+    if len(t_rel) < 2:
+        return 0.0
+    return HOLE_SPACINGS * float(np.median(np.diff(t_rel)))
+
+
+@njit(cache=True)
+def window_time_fraction(t_rel, sh, win_lo, win_hi, gap_tol):  # pragma: no cover - numba
+    """Share of the event window [win_lo, win_hi] that the curve, shifted by ``sh``, spans.
+
+    The curve only exists where the flight has track data, so a track that starts or ends
+    inside the window, or has a hole in it, covers only part of the window."""
+    span = win_hi - win_lo
+    n = t_rel.shape[0]
+    if span <= 0.0:
+        # degenerate (instantaneous) window: covered when the curve spans that instant
+        for i in range(n - 1):
+            if t_rel[i] + sh <= win_lo <= t_rel[i + 1] + sh and t_rel[i + 1] - t_rel[i] <= gap_tol:
+                return 1.0
+        return 0.0
+    cov = 0.0
+    for i in range(n - 1):
+        a = t_rel[i] + sh
+        b = t_rel[i + 1] + sh
+        if b - a > gap_tol:
+            continue
+        lo = a if a > win_lo else win_lo
+        hi = b if b < win_hi else win_hi
+        if hi > lo:
+            cov += hi - lo
+    frac = cov / span
+    return frac if frac < 1.0 else 1.0
 
 
 @njit(cache=True)
@@ -45,9 +83,11 @@ def _score_kernel(
     alphas,
     harmonics,
     hweights,
+    tcov,
 ):
     """f0_vals has shape (S, K): one f0 grid per time shift (centred on the ridge-derived
-    estimate for that shift)."""
+    estimate for that shift). ``tcov[s]`` is the share of the event window the curve spans at
+    shift s (``window_time_fraction``)."""
     T, F = W.shape
     S, A, H = len(shifts), len(alphas), len(harmonics)
     K = f0_vals.shape[1]
@@ -114,10 +154,12 @@ def _score_kernel(
                     # mean over the WHOLE measured window: parts of the window the modelled
                     # curve does not cover (flight left the data, landed, window beyond the
                     # curve) count as zero, so a flight explaining half the sweep earns half
-                    # the score instead of being judged only where it happens to fit
+                    # the score instead of being judged only where it happens to fit. The
+                    # curve has samples only where the track exists, so the share of the
+                    # window it spans (tcov) is applied on top of the in-curve valid share.
                     frac = nvalid / nin
-                    scores[si, ki, ai] = acc / (wsum_pts * wsum) * frac
-                    coverage[si, ki, ai] = cov / (wsum_pts * wsum) * frac
+                    scores[si, ki, ai] = acc / (wsum_pts * wsum) * frac * tcov[si]
+                    coverage[si, ki, ai] = cov / (wsum_pts * wsum) * frac * tcov[si]
                     valid[si, ki, ai] = frac
     return scores, coverage, valid
 
@@ -310,7 +352,15 @@ def score_event_curve(
         ev.t_start_s,
         ev.t_end_s,
     )
-    scores, coverage, valid = _score_kernel(*args, f0s, shifts, alphas, harmonics, hw)
+    gap_tol = curve_gap_tolerance(t_rel)
+    tcov = np.array(
+        [
+            window_time_fraction(t_rel, float(sh), ev.t_start_s, ev.t_end_s, gap_tol)
+            for sh in shifts
+        ],
+        dtype=np.float64,
+    )
+    scores, coverage, valid = _score_kernel(*args, f0s, shifts, alphas, harmonics, hw, tcov)
     amax = np.max(np.abs(alphas)) or 1.0
     pen = cfg.alpha_penalty_z * (alphas / amax) ** 2
     adj = scores - pen[None, None, :]
@@ -332,7 +382,7 @@ def score_event_curve(
             k, _a = ka[si]
             f_fine = (f0s[si, k] * rel_fine)[None, :]
             sc2, cov2, val2 = _score_kernel(
-                *args, f_fine, shifts[si : si + 1], alphas, harmonics, hw
+                *args, f_fine, shifts[si : si + 1], alphas, harmonics, hw, tcov[si : si + 1]
             )
             adj2 = np.where(val2 >= cfg.min_valid_fraction, sc2 - pen[None, None, :], -9.0)[0]
             kk, aa = np.unravel_index(int(np.argmax(adj2)), adj2.shape)

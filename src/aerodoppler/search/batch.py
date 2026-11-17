@@ -24,7 +24,13 @@ import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
 
-from aerodoppler.search.score import CLIP_HI, CLIP_LO, ON_RIDGE_Z
+from aerodoppler.search.score import (
+    CLIP_HI,
+    CLIP_LO,
+    HOLE_SPACINGS,
+    ON_RIDGE_Z,
+    window_time_fraction,
+)
 
 NEG = -9.0
 
@@ -191,9 +197,11 @@ def _sweep(  # pragma: no cover - numba
     hweights,
     wsum,
     min_valid,
+    tcov,
 ):
     """search.score._score_kernel for one (shift, f0) and alpha = 0: whole-window mean of the
-    clipped whitened spectrogram along the predicted harmonics. Returns (score, coverage)."""
+    clipped whitened spectrogram along the predicted harmonics; ``tcov`` is the share of the
+    event window the curve spans at this shift. Returns (score, coverage)."""
     T, F = W.shape
     H = harmonics.shape[0]
     n = t_rel.shape[0]
@@ -247,8 +255,8 @@ def _sweep(  # pragma: no cover - numba
     if nvalid > 0 and nin > 0 and wsum_pts > 0.0:
         frac = nvalid / nin
         if frac >= min_valid:
-            sc = acc / (wsum_pts * wsum) * frac
-        cv = cov / (wsum_pts * wsum) * frac
+            sc = acc / (wsum_pts * wsum) * frac * tcov
+        cv = cov / (wsum_pts * wsum) * frac * tcov
     return sc, cv
 
 
@@ -347,6 +355,11 @@ def _event_curve_score(  # pragma: no cover - numba
         mx = max(dD.max(), 1e-12)
         for i in range(n):
             pw[i] = slope_floor + (1.0 - slope_floor) * dD[i] / mx
+    # share of the event window the curve spans per shift (score.window_time_fraction)
+    gap_tol = HOLE_SPACINGS * np.median(np.diff(t_rel)) if n >= 2 else 0.0
+    tcov = np.empty(S)
+    for si in range(S):
+        tcov[si] = window_time_fraction(t_rel, shifts[si], win_lo, win_hi, gap_tol)
     best = np.full(S, NEG)
     best_cov = np.zeros(S)
     best_k = np.zeros(S, dtype=np.int64)
@@ -369,6 +382,7 @@ def _event_curve_score(  # pragma: no cover - numba
                 hweights,
                 wsum,
                 min_valid,
+                tcov[si],
             )
             # first maximum over k (np.argmax over the flattened (K, A=1) grid)
             if ki == 0 or sc > best[si]:
@@ -404,6 +418,7 @@ def _event_curve_score(  # pragma: no cover - numba
                     hweights,
                     wsum,
                     min_valid,
+                    tcov[si],
                 )
                 if kk == 0 or sc > b2:
                     b2 = sc
