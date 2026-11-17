@@ -190,3 +190,48 @@ def test_confidence_gates_grading():
     )
     core = next(g for g in gates if g["name"] == "core_matches")
     assert "no clock shift satisfies R" in core["detail"]
+
+
+def _slice(curve: PredictedCurve, keep: np.ndarray, seg: str) -> PredictedCurve:
+    return PredictedCurve(
+        curve.t_receive_abs[keep],
+        curve.factor[keep],
+        curve.t_emit[keep],
+        curve.slant_range_m[keep],
+        seg,
+    )
+
+
+def test_a_track_fragment_on_the_ridge_does_not_outscore_the_full_pass():
+    """A flight whose ADS-B track exists for only a few seconds of the event window must not
+    score as if it explained the whole ridge (Florida oracle cases: a 1 s fragment of a2f0fc
+    scored 6.95 against 5.01 for the true flight's full pass)."""
+    spec = _synthetic_spec()
+    t0 = 1_000_000.0
+    f0 = 100.0
+    full = _flyby_curve(t0 + 200.0)
+    tr = full.t_receive_abs - t0
+    for h in (1, 2):
+        _paint_ridge(spec, tr, f0 * h * full.factor)
+    ev = EventInputs(
+        200.0, 50.0, 350.0, 90.0, 110.0, ridge_t=tr[::8], ridge_f=f0 * full.factor[::8]
+    )
+    cfg = ScoreConfig(
+        f0_step_fraction=0.005, alphas=(0.0,), harmonics=(1, 2), harmonic_weights=(1.0, 0.8)
+    )
+    grid = t0 + np.arange(-5.0, 5.5, 1.0)
+    full_res = locked_score(spec, [full], [ev], grid, cfg)
+    # the same aircraft, but its track exists for only 10 s of the 300 s window
+    frag = _slice(full, (tr >= 195.0) & (tr <= 205.0), "fragment")
+    frag_res = locked_score(spec, [frag], [ev], grid, cfg)
+    assert full_res.per_event[0].score > 3.0
+    assert frag_res.per_event[0].score < 0.1 * full_res.per_event[0].score
+    # a track that covers half the window earns about half the score ...
+    half = _slice(full, tr <= 200.0, "half")
+    half_res = locked_score(spec, [half], [ev], grid, cfg)
+    ratio = half_res.per_event[0].score / full_res.per_event[0].score
+    assert 0.35 < ratio < 0.65
+    # ... and a hole in the track (a sample gap beyond max_gap_s) is not covered time
+    holed = _slice(full, (tr <= 120.0) | (tr >= 280.0), "holed")
+    holed_res = locked_score(spec, [holed], [ev], grid, cfg)
+    assert holed_res.per_event[0].score < 0.75 * full_res.per_event[0].score
